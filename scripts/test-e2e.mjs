@@ -218,13 +218,25 @@ await test("dock renders today's spend card with the billing band", async () => 
 	assert.equal(q(".u_dockItem"), null, "the four text rows are gone");
 	assert.ok(q(".u_dockCard") !== null, "spend card rendered");
 	assert.equal(q(".u_costValue").textContent, "¥3.00", "today's spend in CNY");
-	assert.ok(q(".u_costSplit").textContent.includes("峰 ¥2.00"), "peak share shown");
-	assert.ok(q(".u_costSplit").textContent.includes("谷 ¥1.00"), "off-peak share shown");
+	// The peak/off-peak split lives in an instant hover card, not on the card.
+	assert.equal(q(".u_costSplit"), null, "no split text on the card");
+	const costValue = q(".u_costValue");
+	costValue.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+	await sleep(30);
+	const costTip = q("[data-dsh-usage-dock] .u_heatTip");
+	assert.ok(costTip !== null, "hover card appears");
+	assert.ok(costTip.textContent.includes("¥3.0000"), "hover card keeps the exact amount");
+	assert.ok(costTip.textContent.includes("峰 ¥2.00") && costTip.textContent.includes("谷 ¥1.00"), "hover card carries both shares");
+	costValue.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+	await sleep(30);
+	assert.equal(q("[data-dsh-usage-dock] .u_heatTip"), null, "hover card hides on leave");
+	assert.equal(qa(".u_bandEdge").length, 4, "four clock labels under the band");
+	assert.deepEqual(qa(".u_bandEdge").map((el) => el.textContent), ["9时", "12时", "14时", "18时"], "boundary times in order");
 	assert.ok(q(".u_bandZone") !== null, "billing band rendered");
 	assert.equal(qa(".u_bandZone[data-kind=peak]").length, 2, "two peak windows");
-	assert.equal(qa(".u_bandZone[data-active]").length, 1, "only the current zone carries a label");
+	assert.equal(qa(".u_bandZone[data-active]").length, 0, "no text inside the band");
 	assert.equal(qa(".u_bandZone[data-kind=off]").length, 3, "three off-peak zones");
-	assert.ok(["谷", "峰 9-12", "峰 14-18"].some((label) => q(".u_bandZone[data-active]").textContent === label), "current zone label is 峰 or 谷");
+	assert.equal(qa(".u_bandZone").reduce((sum, el) => sum + el.textContent.length, 0), 0, "zones stay unlabelled");
 	assert.ok(q(".u_bandNow") !== null, "current-time marker");
 	const metrics = qa(".u_metricValue").map((el) => el.textContent);
 	assert.equal(metrics.length, 2, "today usage + cache hit rate");
@@ -275,32 +287,46 @@ await test("dual widget compares the DSH and Claude Code channels", async () => 
 	assert.ok(card.querySelector(".u_dualBar") !== null, "ratio bar rendered");
 });
 
-await test("heatmap widget renders the 28×6 activity grid with date labels", async () => {
+await test("heatmap renders 8 weeks × 7 weekdays with a 少→多 legend", async () => {
 	await freshMount();
 	await openPanel();
 	await sleep(100);
 	const card = "[data-dsh-usage-panel] .u_card[data-widget=heatmap]";
-	const grid = q(`${card} .u_heatGrid`);
-	assert.ok(grid !== null, "heatmap grid rendered");
+	assert.ok(q(`${card} .u_heatCalendar`) !== null, "calendar grid rendered");
 	const cells = qa(`${card} .u_heatCell`);
-	assert.equal(cells.length, 28 * 6, "28 day columns × 6 four-hour rows");
-	const hourLabels = qa(`${card} .u_heatHour`);
-	assert.equal(hourLabels.length, 6);
-	assert.equal(hourLabels[0].textContent, "00");
-	assert.equal(hourLabels[2].textContent, "08");
-	assert.equal(hourLabels[5].textContent, "20");
-	// GitHub-style date labels above the columns (window start + month starts).
-	const monthLabels = qa(`${card} .u_heatMonthLabel`);
-	assert.equal(monthLabels.length, 28);
-	assert.ok(monthLabels.some((label) => label.textContent !== ""), "at least one date label rendered");
-	assert.equal(monthLabels[0].textContent, dayLabelOf(new Date(Date.now() - 27 * 86400000)), "window start labeled");
-	// Today 10-12h has usage → the 8-12h row cell carries the aggregate.
-	const todayColumn = cells.filter((cell) => cell.getAttribute("title")?.includes(todayKey));
-	assert.equal(todayColumn.length, 6, "today column present");
-	const hotCell = todayColumn.find((cell) => cell.getAttribute("title")?.includes("08:00–12:00"));
-	assert.ok(hotCell !== undefined, "8-12h cell present");
-	assert.ok(hotCell.getAttribute("title").includes("1,150"), "four-hour aggregate in tooltip");
-	assert.ok(todayColumn.some((cell) => cell.className.includes("u_heatToday")), "today column marked");
+	assert.equal(cells.length, 8 * 7, "8 week columns × 7 weekday rows");
+	const weekdays = qa(`${card} .u_heatWeekday`).map((el) => el.textContent);
+	assert.equal(weekdays.length, 7, "seven weekday rows");
+	assert.equal(weekdays[0], t("heat.wd.0"), "Monday labelled");
+	assert.equal(weekdays[1], t("heat.wd.1"), "Tuesday labelled");
+	assert.equal(weekdays[6], t("heat.wd.6"), "Sunday labelled");
+	assert.deepEqual(weekdays, [0, 1, 2, 3, 4, 5, 6].map((row) => t(`heat.wd.${row}`)), "all seven weekday labels");
+	// Month labels sit above the columns; at least the first week carries one.
+	const months = qa(`${card} .u_heatMonth`);
+	assert.equal(months.length, 8);
+	assert.ok(months[0].textContent.endsWith("月"), "first week labelled with a month");
+	assert.ok(months.some((label) => label.textContent !== ""), "month boundaries labelled");
+	// Today's cell exists and is marked.
+	const todayCell = q(`${card} .u_heatCell.u_heatToday`);
+	assert.ok(todayCell !== null, "today cell present");
+	// Future cells stay blank inside the current week.
+	assert.ok(qa(`${card} .u_heatFuture`).length >= 1, "future days are not painted");
+	// Legend: 少 → 5 swatches → 多.
+	const legend = q(`${card} .u_heatLegend`);
+	assert.ok(legend !== null, "legend rendered");
+	assert.ok(legend.textContent.includes(t("heat.less")) && legend.textContent.includes(t("heat.more")), "legend end labels");
+	assert.equal(legend.querySelectorAll(".u_heatLegendCell").length, 5, "five legend steps");
+	// Hover card: date + exact tokens (+ spend when the day is priced).
+	todayCell.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+	await sleep(30);
+	const tip = q(".u_heatTip");
+	assert.ok(tip !== null, "hover card appears");
+	assert.ok(tip.textContent.includes(todayKey), "hover card shows the date");
+	assert.ok(tip.textContent.includes("token"), "hover card shows the token count");
+	assert.ok(tip.textContent.includes("¥3.00"), "hover card shows the day spend");
+	q(`${card} .u_heatCell`).dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+	await sleep(30);
+	assert.equal(q(".u_heatTip"), null, "hover card disappears");
 });
 
 await test("a card header toggles its body and no drag/pin/hide controls exist", async () => {
@@ -338,6 +364,30 @@ await test("usage rows carry a per-day cost and a hover composition bar", async 
 	assert.ok(foot.textContent.includes(t("usage.cumulativeTokens").replace("{value}", "")), "cumulative tokens");
 	assert.ok(foot.textContent.includes("¥3.00"), "cumulative spend");
 	assert.equal(qa("[data-dsh-usage-panel] .u_legendItem").length, 3, "three-segment legend in the footer");
+});
+
+await test("hit-rate arrow compares against the previous refresh", async () => {
+	await freshMount();
+	await sleep(120);
+	assert.equal(q("[data-dsh-usage-dock] .u_trend"), null, "no arrow before a second refresh");
+	const bumped = JSON.parse(JSON.stringify(USAGE));
+	bumped.days[0].cacheHitRate = 90;
+	bumped.days[0].tokens = 5000;
+	bumped.total.cacheHitRate = 90;
+	usageResponse = () => okResponse(bumped);
+	q(".u_dockRefresh").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(150);
+	const up = q("[data-dsh-usage-dock] .u_trend");
+	assert.ok(up !== null && up.getAttribute("data-trend") === "up", "rise is reported as up");
+	assert.equal(up.textContent, "▲", "up triangle");
+	const flat = JSON.parse(JSON.stringify(USAGE));
+	usageResponse = () => okResponse(flat);
+	q(".u_dockRefresh").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(150);
+	const down = q("[data-dsh-usage-dock] .u_trend");
+	assert.equal(down.getAttribute("data-trend"), "down", "fall is reported as down");
+	assert.equal(down.textContent, "▼");
+	usageResponse = () => okResponse(USAGE);
 });
 
 await test("gear toggles the panel and the refresh button sits beside it", async () => {

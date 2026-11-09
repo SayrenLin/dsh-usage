@@ -212,6 +212,8 @@ await test("bundle is offline: no update checker, no private color tokens", asyn
 	assert.equal(src.includes("--u-accent"), false, "no private accent variable");
 	assert.equal(src.includes("--u-bg"), false, "no private background variable");
 	assert.ok(src.includes("var(--dsw-alias-state-business-primary)"), "accent comes from the DSH theme");
+	assert.equal(src.includes("--dsw-alias-fill-l2"), false, "fill-l2 is not defined by this host");
+	assert.equal(src.includes("--dsw-alias-state-warning-primary"), false, "the warning token is state-warn-primary");
 	assert.ok(src.includes("peakState") && src.includes("8 * 60 * 60 * 1000"), "peak hours are pinned to UTC+8");
 });
 

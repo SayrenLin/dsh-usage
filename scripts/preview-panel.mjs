@@ -101,7 +101,13 @@ dom.window.fetch = async (input) => {
 	if (url.includes("/api/usage/usage")) {
 		return ok({
 			ok: true,
-			days: [{
+			days: [...Array.from({ length: 40 }, (_, index) => {
+				const date = new Date();
+				date.setDate(date.getDate() - (40 - index));
+				const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+				const tokens = [0, 0, 120000, 480000, 900000, 1500000, 2300000][index % 7];
+				return { date: key, tokens, cacheHitRate: 80 + (index % 15), inputTokens: Math.round(tokens * 0.1), outputTokens: Math.round(tokens * 0.05), cacheReadTokens: Math.round(tokens * 0.85), cacheWriteTokens: 0, hours: new Array(24).fill(0), models: [] };
+			}), {
 				date: todayKey, inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0,
 				tokens: 988000, cacheHitRate: 84,
 				hours: Array.from({ length: 24 }, (_, i) => (i >= 9 && i < 12) || (i >= 14 && i < 18) ? 40000 : 6000),
@@ -139,18 +145,18 @@ const lightVars = `:root{
 --dsw-alias-bg-base:#ffffff;--dsw-alias-border-l1:#eef0f3;--dsw-alias-border-l2:#e3e6ea;
 --dsw-alias-label-primary:#111827;--dsw-alias-label-secondary:#6b7280;--dsw-alias-label-tertiary:#9ca3af;
 --dsw-alias-interactive-bg-hover:#f3f4f6;--dsw-alias-interactive-bg-hover-danger:#fdecec;
---dsw-alias-fill-l1:#f3f4f6;--dsw-alias-fill-l2:#e5e7eb;
+--dsw-alias-bg-layer-2:#ffffff;--dsw-alias-label-caption:#81858c;
 --dsw-alias-state-business-primary:#4d6bfe;--dsw-alias-state-success-primary:#1f883d;
---dsw-alias-state-error-primary:#d1242f;--dsw-alias-state-warning-primary:#d29922;
+--dsw-alias-state-error-primary:#d1242f;--dsw-alias-state-warn-primary:#d29922;
 --dsw-alias-state-accent-primary:#4d6bfe;--dsw-shadow-lv2:0 8px 24px rgba(15,23,42,.12);
 font-family:"Segoe UI",system-ui,sans-serif;color:#111827;background:#f7f8fa}`;
 const darkVars = `:root{
 --dsw-alias-bg-base:#17181b;--dsw-alias-border-l1:#2a2c31;--dsw-alias-border-l2:#34373d;
 --dsw-alias-label-primary:#f2f3f5;--dsw-alias-label-secondary:#a9aeb8;--dsw-alias-label-tertiary:#7c828d;
 --dsw-alias-interactive-bg-hover:#26282d;--dsw-alias-interactive-bg-hover-danger:#3a2326;
---dsw-alias-fill-l1:#26282d;--dsw-alias-fill-l2:#303338;
+--dsw-alias-bg-layer-2:#2c2c2e;--dsw-alias-label-caption:#adb2b8;
 --dsw-alias-state-business-primary:#8ea2ff;--dsw-alias-state-success-primary:#4ac26b;
---dsw-alias-state-error-primary:#ff7b81;--dsw-alias-state-warning-primary:#e3b341;
+--dsw-alias-state-error-primary:#ff7b81;--dsw-alias-state-warn-primary:#e3b341;
 --dsw-alias-state-accent-primary:#8ea2ff;--dsw-shadow-lv2:0 8px 24px rgba(0,0,0,.5);
 font-family:"Segoe UI",system-ui,sans-serif;color:#f2f3f5;background:#0e0f11}`;
 const overrides = `
