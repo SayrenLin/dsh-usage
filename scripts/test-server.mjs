@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply, BALANCE_PATH, PROVIDERS_PATH, USAGE_PATH, isLoopbackAddress } from "../lib/index.js";
 import { isPrivateAddress, resolvePublicAddress, safeFetch } from "../lib/safe-fetch.js";
-import { resetClaudeState } from "../lib/claude.js";
 
 const testHome = await mkdtemp(join(tmpdir(), "dsh-usage-test-"));
 process.env.DSH_HOME = testHome;
@@ -71,10 +70,8 @@ function fakeTransport(respond, record = {}) {
 const publicLookup = async () => [{ address: "1.2.3.4", family: 4 }];
 
 async function boot(overrides = {}) {
-	resetClaudeState();
 	const routes = [];
 	const effects = [];
-	const claudeDir = overrides.claudeDir ?? join(testHome, "no-claude-here");
 	const ctx = {
 		credentials: void 0,
 		webServer: { register: (entry) => routes.push(entry) },
@@ -92,8 +89,6 @@ async function boot(overrides = {}) {
 	};
 	await apply(ctx, {}, {
 		disableBackgroundRefresh: true,
-		claudeDir,
-		claudeCachePath: join(testHome, "claude-cache.json"),
 		...(overrides.deps ?? {})
 	});
 	return { routes, effects };
@@ -244,7 +239,7 @@ await test("balance: unauthorized upstream maps to unauthorized status", async (
 
 //#region providers endpoint
 
-await test("providers: lists official route, pi-ai profiles, and legacy entries", async () => {
+await test("providers: lists official route and pi-ai profiles only", async () => {
 	const { routes } = await boot();
 	const res = await call(handlerOf(routes, PROVIDERS_PATH));
 	const body = parsed(res);
@@ -252,8 +247,6 @@ await test("providers: lists official route, pi-ai profiles, and legacy entries"
 	const ids = body.providers.map((p) => p.id);
 	assert.ok(ids.includes("deepseek-official"));
 	assert.ok(ids.includes("ark"));
-	assert.ok(ids.includes("openrouter"));
-	assert.ok(ids.includes("zai"));
 	const deepseek = body.providers.find((p) => p.id === "deepseek-official");
 	assert.equal(deepseek.scheme, "deepseek");
 	assert.equal(deepseek.configured, true);
@@ -322,35 +315,6 @@ await test("usage: persisted sessions fold via listSnapshots/readFrom", async ()
 	assert.equal(parsed(res).total.tokens, 60);
 });
 
-await test("usage: response carries the claude channel (disabled when absent)", async () => {
-	const { routes } = await boot();
-	const res = await call(handlerOf(routes, USAGE_PATH));
-	const body = parsed(res);
-	assert.equal(body.ok, true);
-	assert.deepEqual(body.claude, { enabled: false }, "no claude dir → disabled");
-});
-
-await test("usage: claude channel folds JSONL usage into the dual view", async () => {
-	const claudeDir = join(testHome, "claude-real");
-	mkdirSync(join(claudeDir, "projects"), { recursive: true });
-	writeFileSync(join(claudeDir, "projects", "s.jsonl"), JSON.stringify({
-		type: "assistant",
-		timestamp: new Date().toISOString(),
-		message: { model: "deepseek-v4-pro", usage: { input_tokens: 30, output_tokens: 10 } }
-	}) + "\n");
-	const { routes } = await boot({ claudeDir });
-	const res = await call(handlerOf(routes, USAGE_PATH));
-	const body = parsed(res);
-	assert.equal(body.claude.enabled, true);
-	assert.equal(body.claude.total.tokens, 40);
-	assert.equal(body.claude.days.length, 1);
-	assert.equal(body.claude.days[0].hours.length, 24);
-});
-
-//#endregion
-
-//#region background refresh
-
 await test("background refresh starts immediately and schedules a timer", async () => {
 	const record = {};
 	const timers = [];
@@ -373,7 +337,7 @@ await test("background refresh starts immediately and schedules a timer", async 
 	const background = effects.find((entry) => entry.label === "usage: background refresh");
 	assert.ok(background !== void 0, "background refresh effect registered");
 	await background.cleanup.ready;
-	assert.ok(record.calls >= 3, "startup refresh queried every scheme provider");
+	assert.ok(record.calls >= 1, "startup refresh queried the configured provider");
 	assert.equal(timers.length, 1);
 	assert.equal(timers[0].ms, 300000);
 });

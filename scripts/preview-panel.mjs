@@ -119,11 +119,6 @@ dom.window.fetch = async (input) => {
 			}],
 			total: { inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 } },
 			costMeta: { currency: "CNY", source: "official", offPeakMultiplier: 0.5, unpriced: [] },
-			claude: {
-				enabled: true, files: 2,
-				days: [{ date: todayKey, inputTokens: 300000, outputTokens: 90000, cacheReadTokens: 0, cacheWriteTokens: 0, tokens: 390000, cacheHitRate: 0, hours: new Array(24).fill(0) }],
-				total: { inputTokens: 300000, outputTokens: 90000, cacheReadTokens: 0, cacheWriteTokens: 0, tokens: 390000, cacheHitRate: 0 }
-			},
 			updatedAt: Date.now()
 		});
 	}

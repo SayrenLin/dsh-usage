@@ -39,14 +39,13 @@
     }
   },
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/usage.js && node --check lib/balance.js && node --check lib/safe-fetch.js && node --check lib/claude.js && node --check lib/client.js && node --check scripts/test-balance.mjs && node --check scripts/test-usage.mjs && node --check scripts/test-server.mjs && node --check scripts/test-client.mjs && node --check scripts/test-e2e.mjs && node --check scripts/test-claude.mjs && node --check scripts/test-package.mjs && node --check scripts/test-modern.mjs && node --check scripts/test-compat.mjs",
-    "test": "node scripts/test-balance.mjs && node scripts/test-usage.mjs && node scripts/test-server.mjs && node scripts/test-client.mjs && node scripts/test-e2e.mjs && node scripts/test-claude.mjs && node scripts/test-package.mjs && node scripts/test-modern.mjs && node scripts/test-compat.mjs",
+    "check": "node --check lib/index.js && node --check lib/usage.js && node --check lib/balance.js && node --check lib/safe-fetch.js && node --check lib/client.js && node --check scripts/test-balance.mjs && node --check scripts/test-usage.mjs && node --check scripts/test-server.mjs && node --check scripts/test-client.mjs && node --check scripts/test-e2e.mjs && node --check scripts/test-package.mjs && node --check scripts/test-modern.mjs && node --check scripts/test-compat.mjs",
+    "test": "node scripts/test-balance.mjs && node scripts/test-usage.mjs && node scripts/test-server.mjs && node scripts/test-client.mjs && node scripts/test-e2e.mjs && node scripts/test-package.mjs && node scripts/test-modern.mjs && node scripts/test-compat.mjs",
     "test:balance": "node scripts/test-balance.mjs",
     "test:usage": "node scripts/test-usage.mjs",
     "test:server": "node scripts/test-server.mjs",
     "test:client": "node scripts/test-client.mjs",
     "test:e2e": "node scripts/test-e2e.mjs",
-    "test:claude": "node scripts/test-claude.mjs",
     "test:package": "node scripts/test-package.mjs",
     "test:modern": "node scripts/test-modern.mjs",
     "test:compat": "node scripts/test-compat.mjs"

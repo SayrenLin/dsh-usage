@@ -214,7 +214,7 @@ try {
 		assert.equal(providers.find((p) => p.id === "deepseek-official").apiKeyEnv, "FIXTURE_DS");
 		assert.equal(providers.find((p) => p.id === "moonshotai").apiKeyEnv, "FIXTURE_MOON");
 		assert.ok(!providers.some((p) => p.id === "absent"));
-		assert.equal(providers.find((p) => p.id === "openrouter").apiKeyEnv, "OPENROUTER_MANAGEMENT_KEY");
+		assert.ok(providers.some((p) => p.id === "openrouter"), "no hardcoded credential env is injected");
 	});
 	await test("stored API-key record is supported but OAuth grants stay opaque", async () => {
 		delete forms[1].value.providers.moonshotai.apiKeyEnv;

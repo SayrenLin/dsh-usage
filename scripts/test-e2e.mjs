@@ -261,34 +261,15 @@ await test("the dock card is display-only; only the gear opens the panel", async
 	assert.ok(q("[data-dsh-usage-panel]") !== null, "gear opens the panel");
 });
 
-await test("the panel shows three cards in a fixed order, channel split collapsed", async () => {
+await test("the panel shows two cards in a fixed order", async () => {
 	await freshMount();
 	await openPanel();
 	const panel = q("[data-dsh-usage-panel]");
 	assert.ok(panel !== null, "panel rendered");
 	const cards = qa("[data-dsh-usage-panel] .u_card");
-	assert.deepEqual(cards.map((el) => el.getAttribute("data-widget")), ["balance", "heatmap", "dual"], "fixed card order");
+	assert.deepEqual(cards.map((el) => el.getAttribute("data-widget")), ["balance", "heatmap"], "fixed card order");
 	assert.ok(panel.textContent.includes("¥128.00"), "balance detail shown");
-	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=dual]").getAttribute("data-collapsed"), "true", "channel split starts collapsed");
-	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=dual] .u_cardBody"), null, "collapsed card has no body");
 	assert.ok(panel.textContent.includes(t("widget.heatmap")), "heatmap card titled");
-});
-
-await test("dual widget compares the DSH and Claude Code channels", async () => {
-	await freshMount();
-	await openPanel();
-	q("[data-dsh-usage-panel] .u_card[data-widget=dual] .u_cardHead").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(80);
-	const card = q("[data-dsh-usage-panel] .u_card[data-widget=dual]");
-	assert.equal(card.getAttribute("data-collapsed"), null, "header click expands the card");
-	const rows = [...card.querySelectorAll(".u_dualRow")];
-	assert.equal(rows.length, 2);
-	// DSH 1150 / (1150 + 420) ≈ 73%; Claude ≈ 27%.
-	assert.ok(rows[0].textContent.includes("DSH 通道"), "dsh channel row");
-	assert.ok(rows[0].textContent.includes("73%"), "dsh share shown");
-	assert.ok(rows[1].textContent.includes("Claude Code"), "claude channel row");
-	assert.ok(rows[1].textContent.includes("27%"), "claude share shown");
-	assert.ok(card.querySelector(".u_dualBar") !== null, "ratio bar rendered");
 });
 
 await test("heatmap renders 8 weeks × 7 weekdays with a 少→多 legend", async () => {
@@ -608,9 +589,7 @@ await test("legacy-only coverage stays quiet: exact subtotals, disclosure withou
 	assert.equal(q(".u_metricValue").textContent, "1.1k");
 	assert.equal(qa(".u_metricValue")[1].textContent, "87%");
 	assert.ok(!q('[data-dsh-usage-panel]').textContent.includes("≥"), "values are exact subtotals, not lower bounds");
-	q(".u_card[data-widget=dual] .u_cardHead").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(60);
-	assert.ok(q(".u_card[data-widget=dual] .u_dualBar") !== null, "legacy-only coverage still renders the channel share");
 	assert.equal(q('.u_card[data-widget=balance] .u_balanceAmount').textContent, "¥128.00");
 	usageResponse = () => okResponse(USAGE);
 	q('.u_coverageSummary').click();
@@ -632,9 +611,7 @@ await test("non-legacy coverage keeps the warning dot and the partial explanatio
 	assert.equal(q('.u_coverageLabel').textContent, "部分统计 · 1 条会话未计入");
 	q('.u_coverageSummary').click();
 	assert.equal(q('.u_coverageText').textContent, "已排除无法读取的会话，数值为可读小计");
-	q(".u_card[data-widget=dual] .u_cardHead").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(60);
-	assert.equal(q(".u_card[data-widget=dual] .u_dualBar"), null, "actionable skips still block the channel share");
 });
 
 await test("all unreadable records show unavailable, never zero tokens or a zero activity heatmap", async () => {
