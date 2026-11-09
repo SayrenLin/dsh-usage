@@ -101,6 +101,10 @@ const USAGE = {
 			return hours;
 		})(),
 		models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87, cost: { total: 3, peak: 2, offPeak: 1 } }],
+		sessions: [
+			{ id: "session-alpha", title: "安装 dsh 插件", inputTokens: 100, outputTokens: 50, cacheReadTokens: 650, cacheWriteTokens: 0, tokens: 800, cacheHitRate: 80, cost: { total: 2, peak: 1.5, offPeak: 0.5 }, cwd: "C:\\Users\\pc01\\Vibe", createdAt: 1 },
+			{ id: "session-beta", title: null, inputTokens: 0, outputTokens: 10, cacheReadTokens: 340, cacheWriteTokens: 0, tokens: 350, cacheHitRate: 90, cost: { total: 1, peak: 0.5, offPeak: 0.5 }, cwd: "C:\\Users\\pc01\\docs", createdAt: 2 }
+		],
 		cost: { total: 3, peak: 2, offPeak: 1 }
 	}],
 	total: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87, cost: { total: 3, peak: 2, offPeak: 1 } },
@@ -257,17 +261,17 @@ await test("the dock card is display-only; only the gear opens the panel", async
 	assert.ok(q("[data-dsh-usage-panel]") !== null, "gear opens the panel");
 });
 
-await test("the panel shows four cards in a fixed order, channel split collapsed", async () => {
+await test("the panel shows three cards in a fixed order, channel split collapsed", async () => {
 	await freshMount();
 	await openPanel();
 	const panel = q("[data-dsh-usage-panel]");
 	assert.ok(panel !== null, "panel rendered");
 	const cards = qa("[data-dsh-usage-panel] .u_card");
-	assert.deepEqual(cards.map((el) => el.getAttribute("data-widget")), ["balance", "recent", "heatmap", "dual"], "fixed card order");
+	assert.deepEqual(cards.map((el) => el.getAttribute("data-widget")), ["balance", "heatmap", "dual"], "fixed card order");
 	assert.ok(panel.textContent.includes("¥128.00"), "balance detail shown");
 	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=dual]").getAttribute("data-collapsed"), "true", "channel split starts collapsed");
 	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=dual] .u_cardBody"), null, "collapsed card has no body");
-	assert.ok(panel.textContent.includes(t("widget.recent")), "usage records card titled");
+	assert.ok(panel.textContent.includes(t("widget.heatmap")), "heatmap card titled");
 });
 
 await test("dual widget compares the DSH and Claude Code channels", async () => {
@@ -346,24 +350,26 @@ await test("a card header toggles its body and no drag/pin/hide controls exist",
 	assert.equal(head.getAttribute("aria-expanded"), "false");
 });
 
-await test("usage rows carry a per-day cost and a hover composition bar", async () => {
+await test("the heatmap card shows the selected day's sessions", async () => {
 	await freshMount();
 	await openPanel();
-	const row = q("[data-dsh-usage-panel] .u_card[data-widget=recent] .u_day");
-	assert.ok(row !== null, "day row rendered");
-	assert.equal(row.querySelector(".u_dayDate").textContent.length > 0, true, "date column");
-	assert.equal(row.querySelector(".u_dayTokens").textContent, "1.1k", "tokens column");
-	assert.equal(row.querySelector(".u_dayHit").textContent, "87%", "hit column");
-	assert.equal(row.querySelector(".u_dayCost").textContent, "¥3.00", "per-day spend column");
-	const bar = row.querySelector(".u_dayBar");
-	assert.ok(bar !== null, "composition bar lives in the row (shown on hover/focus)");
-	assert.equal(bar.querySelectorAll(".u_barSeg").length, 3, "input / cacheRead / output segments");
-	const foot = q("[data-dsh-usage-panel] .u_card[data-widget=recent] .u_recentFoot");
-	assert.ok(foot !== null, "footer meta present");
-	assert.ok(foot.textContent.includes(t("usage.cumulativeHit").replace("{value}", "")), "cumulative hit rate");
-	assert.ok(foot.textContent.includes(t("usage.cumulativeTokens").replace("{value}", "")), "cumulative tokens");
-	assert.ok(foot.textContent.includes("¥3.00"), "cumulative spend");
-	assert.equal(qa("[data-dsh-usage-panel] .u_legendItem").length, 3, "three-segment legend in the footer");
+	await sleep(80);
+	const detail = q("[data-dsh-usage-panel] .u_heatDetail");
+	assert.ok(detail !== null, "detail area rendered");
+	assert.ok(detail.querySelector(".u_detailDay").textContent.length > 0, "day label");
+	assert.equal(detail.querySelector(".u_detailCost").textContent, "¥3.00", "day spend");
+	const meta = detail.querySelector(".u_detailMeta").textContent;
+	assert.ok(meta.includes("1.1k") && meta.includes("87%"), "tokens and hit rate in the summary");
+	const row = detail.querySelector(".u_modelRow");
+	assert.ok(row !== null, "session row rendered");
+	assert.ok(row.querySelector(".u_modelName").textContent.includes("安装 dsh 插件"), "session title");
+	assert.equal(row.querySelector(".u_modelTokens").textContent, "800", "session tokens");
+	assert.equal(row.querySelector(".u_modelCost").textContent, "¥2.00", "session spend");
+	assert.equal(row.querySelectorAll(".u_barSeg").length, 3, "session composition bar");
+	assert.equal(qa("[data-dsh-usage-panel] .u_detailLegend .u_legendItem").length, 3, "three-segment legend");
+	const foot = q("[data-dsh-usage-panel] .u_footerNote");
+	assert.ok(foot.textContent.includes(t("usage.cumulativeTokens").replace("{value}", "")), "cumulative tokens in the panel footer");
+	assert.ok(foot.textContent.includes("¥3.00"), "cumulative spend in the panel footer");
 });
 
 await test("hit-rate arrow compares against the previous refresh", async () => {
@@ -379,14 +385,19 @@ await test("hit-rate arrow compares against the previous refresh", async () => {
 	await sleep(150);
 	const up = q("[data-dsh-usage-dock] .u_trend");
 	assert.ok(up !== null && up.getAttribute("data-trend") === "up", "rise is reported as up");
-	assert.equal(up.textContent, "▲", "up triangle");
-	const flat = JSON.parse(JSON.stringify(USAGE));
-	usageResponse = () => okResponse(flat);
+	assert.equal(up.textContent, "", "geometry only, no glyph");
+	const baseline = JSON.parse(JSON.stringify(USAGE));
+	usageResponse = () => okResponse(JSON.parse(JSON.stringify(baseline)));
 	q(".u_dockRefresh").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(150);
 	const down = q("[data-dsh-usage-dock] .u_trend");
 	assert.equal(down.getAttribute("data-trend"), "down", "fall is reported as down");
-	assert.equal(down.textContent, "▼");
+	// Same rate again → flat square.
+	q(".u_dockRefresh").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(150);
+	const flat = q("[data-dsh-usage-dock] .u_trend");
+	assert.equal(flat.getAttribute("data-trend"), "flat", "unchanged rate is flat");
+	assert.equal(flat.textContent, "");
 	usageResponse = () => okResponse(USAGE);
 });
 
@@ -542,22 +553,18 @@ await test("switching provider shows its not-configured state", async () => {
 	assert.ok(!options.includes("zai"), "unconfigured providers never appear");
 });
 
-await test("clicking a recent day opens the model breakdown", async () => {
+await test("clicking a heat cell selects that day", async () => {
 	await freshMount();
 	await openPanel();
 	await sleep(100);
-	const dayRow = q("[data-dsh-usage-panel] .u_day");
-	assert.ok(dayRow !== null, "recent day row present");
-	dayRow.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	const selected = q("[data-dsh-usage-panel] .u_heatCell[data-selected]");
+	assert.ok(selected !== null, "today is selected by default");
+	selected.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(50);
+	assert.ok(q("[data-dsh-usage-panel] .u_heatCell[data-selected]") !== null, "click keeps a selection");
+	assert.ok(q("[data-dsh-usage-panel] .u_heatDetail") !== null, "detail stays visible");
 	const panel = q("[data-dsh-usage-panel]");
-	assert.ok(panel.textContent.includes("deepseek-official/deepseek-v4-pro"), "model breakdown rendered");
-	assert.ok(panel.querySelector(".u_detailSummary") !== null, "day summary line present");
-	assert.ok(qa("[data-dsh-usage-panel] .u_modelRow .u_bar").length >= 1, "each model row gets a composition bar");
-	assert.ok(panel.querySelector(".u_modelCost") !== null, "per-model spend rendered");
-	const backButton = q("[data-dsh-usage-panel] .u_back");
-	assert.ok(backButton !== null, "back button present");
-	assert.equal(backButton.getAttribute("aria-label"), t("action.back"));
+	assert.ok(panel.querySelector(".u_modelCost") !== null, "session spend rendered");
 });
 
 await test("closing the panel keeps the dock alive", async () => {
@@ -640,7 +647,7 @@ await test("all unreadable records show unavailable, never zero tokens or a zero
 	assert.equal(q('.u_coverageLabel').textContent, "用量暂不可用 · 1 条会话未计入");
 	assert.ok(q('.u_coverageDetails').textContent.includes("未按零用量计算"));
 	assert.equal(q('.u_coverage').open, false);
-	assert.ok(q('.u_card[data-widget=recent]').textContent.includes(t("usage.unavailable")));
+	assert.ok(q('.u_card[data-widget=heatmap]').textContent.includes(t("usage.unavailable")));
 	assert.equal(q('.u_heatGrid'), null);
 	usageResponse = () => okResponse(USAGE);
 });

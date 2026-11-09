@@ -131,7 +131,6 @@ await test("settings: only layout state survives", async () => {
 	assert.equal("widgets" in base, false, "card visibility is not user state");
 	assert.equal(base.dockOffset, 72);
 	assert.equal(base.collapsed.dual, true, "the channel split starts collapsed");
-	assert.equal(base.collapsed.recent, false);
 	assert.equal(base.collapsed.heatmap, false);
 	const normalized = normalizeSettings({ order: ["bogus"], widgets: { balance: { pinned: true } }, theme: { accent: "#0ea5e9" }, collapsed: { heatmap: true }, dockOffset: 9999 });
 	assert.equal("order" in normalized, false, "legacy keys are dropped");

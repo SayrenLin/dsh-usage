@@ -112,6 +112,9 @@ dom.window.fetch = async (input) => {
 				tokens: 988000, cacheHitRate: 84,
 				hours: Array.from({ length: 24 }, (_, i) => (i >= 9 && i < 12) || (i >= 14 && i < 18) ? 40000 : 6000),
 				models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 } }],
+				sessions: [
+					{ id: "session-alpha", title: "安装 dsh 插件并添加悬浮窗文字", inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 }, cwd: "C:\\Users\\pc01\\Vibe" }
+				],
 				cost: { total: 3.42, peak: 2.31, offPeak: 1.11 }
 			}],
 			total: { inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 } },
