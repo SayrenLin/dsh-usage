@@ -112,7 +112,7 @@ try {
 		persistence.records.delete("child");
 		assert.equal((await collectUsage(ctx)).total.tokens, 87);
 		const raw = await readFile(join(home, "storages", "usage-cache.json"), "utf8");
-		assert.equal(JSON.parse(raw).version, 4);
+		assert.equal(JSON.parse(raw).version, 5);
 		assert.ok(!raw.includes('"revision"'));
 		assert.ok(!raw.includes("SYNTHETIC-TEXT-NOT-FOR-CACHE"));
 	});

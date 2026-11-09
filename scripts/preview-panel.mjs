@@ -105,9 +105,11 @@ dom.window.fetch = async (input) => {
 				date: todayKey, inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0,
 				tokens: 988000, cacheHitRate: 84,
 				hours: Array.from({ length: 24 }, (_, i) => (i >= 9 && i < 12) || (i >= 14 && i < 18) ? 40000 : 6000),
-				models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84 }]
+				models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 } }],
+				cost: { total: 3.42, peak: 2.31, offPeak: 1.11 }
 			}],
-			total: { inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84 },
+			total: { inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 } },
+			costMeta: { currency: "CNY", source: "official", offPeakMultiplier: 0.5, unpriced: [] },
 			claude: {
 				enabled: true, files: 2,
 				days: [{ date: todayKey, inputTokens: 300000, outputTokens: 90000, cacheReadTokens: 0, cacheWriteTokens: 0, tokens: 390000, cacheHitRate: 0, hours: new Array(24).fill(0) }],
@@ -154,7 +156,7 @@ font-family:"Segoe UI",system-ui,sans-serif;color:#f2f3f5;background:#0e0f11}`;
 const overrides = `
 body{margin:0;padding:28px;background:inherit}
 .u_dock{position:static!important;margin:0 0 20px}
-.u_panel{position:static!important;max-height:none!important;left:auto!important;bottom:auto!important}
+.u_panel{position:relative!important;max-height:none!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;width:100%!important}
 .u_dock,.u_panel{box-shadow:0 8px 24px rgba(15,23,42,.12)}
 /* the mocked icon components render empty spans; give them a visible body */
 [data-icon]{display:inline-block;width:12px;height:12px;border-radius:3px;background:currentColor;opacity:.55}`;
@@ -168,6 +170,18 @@ function doc(name, vars, body, css) {
 const healthy = await render();
 writeFileSync(join(root, ".preview", "panel-light.html"), doc("panel-light", lightVars, healthy.body, healthy.css), "utf8");
 writeFileSync(join(root, ".preview", "panel-dark.html"), doc("panel-dark", darkVars, healthy.body, healthy.css), "utf8");
+
+// Drilldown preview: click the first usage row so the model view is captured.
+const detail = await (async () => {
+	const snap = await render();
+	const row = document.querySelector(".u_day");
+	if (row !== null) {
+		row.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	}
+	await sleep(150);
+	return { body: document.getElementById("root").innerHTML, css: document.head.textContent };
+})();
+writeFileSync(join(root, ".preview", "panel-detail.html"), doc("panel-detail", lightVars, detail.body, detail.css), "utf8");
 
 account = {
 	id: "deepseek-official", displayName: "DeepSeek", scheme: "deepseek", mode: "balance",

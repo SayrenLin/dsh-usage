@@ -79,7 +79,7 @@ const dayLabelOf = (date) => `${pad(date.getMonth() + 1)}-${pad(date.getDate())}
 
 const PROVIDERS = [
 	{ id: "deepseek-official", displayName: "DeepSeek", scheme: "deepseek", configured: true, status: "ok", fetchedAt: Date.now(), balance: { isAvailable: true, currency: "CNY", total: "128.00", granted: "0.00", toppedUp: "128.00" } },
-	{ id: "openrouter", displayName: "OpenRouter", scheme: "openrouter", configured: false, status: "not-configured", fetchedAt: Date.now(), balance: null },
+	{ id: "openrouter", displayName: "OpenRouter", scheme: "openrouter", configured: true, status: "not-configured", fetchedAt: Date.now(), balance: null },
 	{ id: "zai", displayName: "Z.ai", scheme: "zai", configured: false, status: "not-configured", fetchedAt: Date.now(), balance: null }
 ];
 const ACCOUNT = { id: "deepseek-official", displayName: "DeepSeek", scheme: "deepseek", mode: "balance", status: "ok", balance: { isAvailable: true, currency: "CNY", total: "128.00", granted: "0.00", toppedUp: "128.00" }, fetchedAt: Date.now() };
@@ -100,9 +100,11 @@ const USAGE = {
 			hours[11] = 750;
 			return hours;
 		})(),
-		models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87 }]
+		models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87, cost: { total: 3, peak: 2, offPeak: 1 } }],
+		cost: { total: 3, peak: 2, offPeak: 1 }
 	}],
-	total: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87 },
+	total: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87, cost: { total: 3, peak: 2, offPeak: 1 } },
+	costMeta: { currency: "CNY", source: "official", offPeakMultiplier: 0.5, unpriced: [] },
 	claude: {
 		enabled: true,
 		files: 1,
@@ -209,84 +211,90 @@ const qa = (selector) => [...document.querySelectorAll(selector)];
 
 //#region flows
 
-await test("dock renders pinned compacts with live values", async () => {
+await test("dock renders today's spend card with the billing band", async () => {
 	await freshMount();
 	const dock = q("[data-dsh-usage-dock]");
 	assert.ok(dock !== null, "dock rendered");
-	const items = qa(".u_dockItem");
-	assert.equal(items.length, 4, "default pinned widgets: balance + today + month + hit");
-	const balanceItem = q(".u_dockItem[data-widget=balance] .u_floatValue");
-	assert.equal(balanceItem.textContent, "¥128.00");
-	assert.equal(balanceItem.getAttribute("data-tone"), "ok", "healthy balance renders green");
-	const todayItem = q(".u_dockItem[data-widget=today] .u_floatValue");
-	assert.equal(todayItem.textContent, "1.1k");
-	assert.ok(q(".u_dockItem[data-widget=month]") !== null, "month pinned by default");
-	assert.ok(q(".u_dockItem[data-widget=hit]") !== null, "hit pinned by default");
+	assert.equal(q(".u_dockItem"), null, "the four text rows are gone");
+	assert.ok(q(".u_dockCard") !== null, "spend card rendered");
+	assert.equal(q(".u_costValue").textContent, "¥3.00", "today's spend in CNY");
+	assert.ok(q(".u_costSplit").textContent.includes("峰 ¥2.00"), "peak share shown");
+	assert.ok(q(".u_costSplit").textContent.includes("谷 ¥1.00"), "off-peak share shown");
+	assert.ok(q(".u_bandZone") !== null, "billing band rendered");
+	assert.equal(qa(".u_bandZone[data-kind=peak]").length, 2, "two peak windows");
+	assert.equal(qa(".u_bandZone[data-active]").length, 1, "only the current zone carries a label");
+	assert.equal(qa(".u_bandZone[data-kind=off]").length, 3, "three off-peak zones");
+	assert.ok(["谷", "峰 9-12", "峰 14-18"].some((label) => q(".u_bandZone[data-active]").textContent === label), "current zone label is 峰 or 谷");
+	assert.ok(q(".u_bandNow") !== null, "current-time marker");
+	const metrics = qa(".u_metricValue").map((el) => el.textContent);
+	assert.equal(metrics.length, 2, "today usage + cache hit rate");
+	assert.equal(metrics[0], "1.1k", "today tokens");
+	assert.equal(metrics[1], "87%", "today cache hit rate");
+	assert.ok(q(".u_dockBar") !== null, "today's composition bar");
+	assert.equal(qa(".u_dockLegend .u_legendItem").length, 3, "dock bar legend has three entries");
+	assert.equal(q(".u_balanceLineValue").textContent, "¥128.00", "balance reminder");
+	assert.equal(q(".u_balanceLineValue").getAttribute("data-tone"), "ok");
 });
 
-await test("dock rows are display-only; the gear opens the panel", async () => {
+await test("the dock card is display-only; only the gear opens the panel", async () => {
 	await freshMount();
-	// Clicking a row must do nothing: the text is not a control any more.
-	q(".u_dockItem[data-widget=balance]").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	q(".u_dockItem[data-widget=today]").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	q(".u_dockCard").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(150);
-	assert.equal(q("[data-dsh-usage-panel]"), null, "row clicks no longer open the panel");
-	assert.equal(q(".u_dockItem[data-widget=balance]").tagName, "DIV", "rows are plain divs");
-	assert.equal(q(".u_dockItem[data-widget=balance]").getAttribute("role"), null, "rows expose no interactive role");
+	assert.equal(q("[data-dsh-usage-panel]"), null, "card clicks do nothing");
+	await openPanel();
+	assert.ok(q("[data-dsh-usage-panel]") !== null, "gear opens the panel");
 });
 
-await test("the gear opens the panel with all widgets", async () => {
+await test("the panel shows four cards in a fixed order, channel split collapsed", async () => {
 	await freshMount();
 	await openPanel();
-	await sleep(100);
 	const panel = q("[data-dsh-usage-panel]");
 	assert.ok(panel !== null, "panel rendered");
-	const widgets = qa("[data-dsh-usage-panel] .u_widget");
-	assert.equal(widgets.length, 7, "all seven widgets visible (incl. heatmap + dual)");
+	const cards = qa("[data-dsh-usage-panel] .u_card");
+	assert.deepEqual(cards.map((el) => el.getAttribute("data-widget")), ["balance", "recent", "heatmap", "dual"], "fixed card order");
 	assert.ok(panel.textContent.includes("¥128.00"), "balance detail shown");
-	assert.ok(panel.textContent.includes(t("widget.today")), "today widget present");
-	// Breakdown items must carry the real bucket values, not zeroes.
-	const breakItems = [...q("[data-dsh-usage-panel] .u_widget[data-widget=today]").querySelectorAll(".u_statBreakItem")];
-	assert.equal(breakItems.length, 3, "input/output/cacheRead items present");
-	assert.deepEqual(breakItems.map((el) => el.textContent), ["输入 100", "输出 50", "缓存读 1.0k"], "bucket values populated");
+	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=dual]").getAttribute("data-collapsed"), "true", "channel split starts collapsed");
+	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=dual] .u_cardBody"), null, "collapsed card has no body");
+	assert.ok(panel.textContent.includes(t("widget.recent")), "usage records card titled");
 });
 
 await test("dual widget compares the DSH and Claude Code channels", async () => {
 	await freshMount();
 	await openPanel();
-	await sleep(100);
-	const dual = q("[data-dsh-usage-panel] .u_widget[data-widget=dual]");
-	assert.ok(dual !== null, "dual widget present");
-	const rows = qa("[data-dsh-usage-panel] .u_widget[data-widget=dual] .u_dualRow");
+	q("[data-dsh-usage-panel] .u_card[data-widget=dual] .u_cardHead").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(80);
+	const card = q("[data-dsh-usage-panel] .u_card[data-widget=dual]");
+	assert.equal(card.getAttribute("data-collapsed"), null, "header click expands the card");
+	const rows = [...card.querySelectorAll(".u_dualRow")];
 	assert.equal(rows.length, 2);
 	// DSH 1150 / (1150 + 420) ≈ 73%; Claude ≈ 27%.
 	assert.ok(rows[0].textContent.includes("DSH 通道"), "dsh channel row");
 	assert.ok(rows[0].textContent.includes("73%"), "dsh share shown");
 	assert.ok(rows[1].textContent.includes("Claude Code"), "claude channel row");
 	assert.ok(rows[1].textContent.includes("27%"), "claude share shown");
-	const bar = q("[data-dsh-usage-panel] .u_widget[data-widget=dual] .u_dualBar");
-	assert.ok(bar !== null, "ratio bar rendered");
+	assert.ok(card.querySelector(".u_dualBar") !== null, "ratio bar rendered");
 });
 
 await test("heatmap widget renders the 28×6 activity grid with date labels", async () => {
 	await freshMount();
 	await openPanel();
 	await sleep(100);
-	const grid = q("[data-dsh-usage-panel] .u_widget[data-widget=heatmap] .u_heatGrid");
+	const card = "[data-dsh-usage-panel] .u_card[data-widget=heatmap]";
+	const grid = q(`${card} .u_heatGrid`);
 	assert.ok(grid !== null, "heatmap grid rendered");
-	const cells = qa("[data-dsh-usage-panel] .u_widget[data-widget=heatmap] .u_heatCell");
+	const cells = qa(`${card} .u_heatCell`);
 	assert.equal(cells.length, 28 * 6, "28 day columns × 6 four-hour rows");
-	const hourLabels = qa("[data-dsh-usage-panel] .u_widget[data-widget=heatmap] .u_heatHour");
+	const hourLabels = qa(`${card} .u_heatHour`);
 	assert.equal(hourLabels.length, 6);
 	assert.equal(hourLabels[0].textContent, "00");
 	assert.equal(hourLabels[2].textContent, "08");
 	assert.equal(hourLabels[5].textContent, "20");
 	// GitHub-style date labels above the columns (window start + month starts).
-	const monthLabels = qa("[data-dsh-usage-panel] .u_widget[data-widget=heatmap] .u_heatMonthLabel");
+	const monthLabels = qa(`${card} .u_heatMonthLabel`);
 	assert.equal(monthLabels.length, 28);
 	assert.ok(monthLabels.some((label) => label.textContent !== ""), "at least one date label rendered");
 	assert.equal(monthLabels[0].textContent, dayLabelOf(new Date(Date.now() - 27 * 86400000)), "window start labeled");
-	// Today 10-12h has usage → row 2 (8-12h) today cell carries the aggregate.
+	// Today 10-12h has usage → the 8-12h row cell carries the aggregate.
 	const todayColumn = cells.filter((cell) => cell.getAttribute("title")?.includes(todayKey));
 	assert.equal(todayColumn.length, 6, "today column present");
 	const hotCell = todayColumn.find((cell) => cell.getAttribute("title")?.includes("08:00–12:00"));
@@ -295,74 +303,41 @@ await test("heatmap widget renders the 28×6 activity grid with date labels", as
 	assert.ok(todayColumn.some((cell) => cell.className.includes("u_heatToday")), "today column marked");
 });
 
-await test("pin toggles a widget out of and back into the dock", async () => {
+await test("a card header toggles its body and no drag/pin/hide controls exist", async () => {
 	await freshMount();
 	await openPanel();
-	await sleep(100);
-	const balanceHead = q("[data-dsh-usage-panel] .u_widget[data-widget=balance] .u_widgetHead");
-	const pinButton = [...balanceHead.querySelectorAll(".u_wIconBtn")].find((b) => b.getAttribute("aria-label") === t("action.unpin"));
-	assert.ok(pinButton !== null, "unpin button present (balance pinned by default)");
-	pinButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(80);
-	assert.equal(qa(".u_dockItem").length, 3, "balance left the dock");
-	assert.equal(q(".u_dockItem[data-widget=balance]"), null, "balance compact removed");
-	// Pin it back.
-	pinButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(80);
-	assert.equal(qa(".u_dockItem").length, 4, "balance rejoined the dock");
-	assert.ok(q(".u_dockItem[data-widget=balance]") !== null, "balance compact restored");
-	assert.equal(pinButton.getAttribute("data-pinned"), "true", "pin state toggled");
-});
-
-await test("cards lay out two-per-row with drag grip, hover actions, and renamed titles", async () => {
-	await freshMount();
-	await openPanel();
-	await sleep(100);
-	const panel = q("[data-dsh-usage-panel]");
-	// Two-column grid with full/half width classes.
-	const grid = q("[data-dsh-usage-panel] .u_grid");
-	assert.ok(grid !== null, "grid container present");
-	assert.equal(q(".u_widget[data-widget=balance]").getAttribute("data-width"), "full");
-	assert.equal(q(".u_widget[data-widget=today]").getAttribute("data-width"), "half");
-	assert.equal(q(".u_widget[data-widget=dual]").getAttribute("data-width"), "half");
-	assert.equal(q(".u_widget[data-widget=recent]").getAttribute("data-width"), "full");
-	// Renamed titles.
-	assert.ok(panel.textContent.includes("用量记录"), "recent renamed to 用量记录");
-	assert.ok(panel.textContent.includes("通道比例"), "dual renamed to 通道比例");
-	// Drag grip present; arrow move buttons gone.
-	const todayHead = q(".u_widget[data-widget=today] .u_widgetHead");
-	assert.ok(todayHead.querySelectorAll("svg rect").length >= 3, "grip icon rendered");
-	assert.equal([...todayHead.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === t("action.moveUp")), undefined, "no move-up button");
-	assert.equal([...todayHead.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === t("action.moveDown")), undefined, "no move-down button");
-	// Pin/hide carry the hover-only class; cards are draggable. (hit is pinned
-	// by default now, so its aria-label reads "unpin".)
-	const hitHead = q(".u_widget[data-widget=hit] .u_widgetHead");
-	const pin = [...hitHead.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === t("action.unpin"));
-	assert.ok(pin !== undefined, "pin button present");
-	assert.ok(pin.className.includes("u_wHoverBtn"), "pin is hover-only");
-	assert.equal(q(".u_widget[data-widget=today]").getAttribute("draggable"), "true", "card draggable");
-});
-
-await test("drag shows a ghost slot and commits the order on drop", async () => {
-	await freshMount();
-	await openPanel();
-	await sleep(100);
-	const monthCard = q(".u_widget[data-widget=month]");
-	monthCard.dispatchEvent(new dom.window.Event("dragstart", { bubbles: true, cancelable: true }));
-	await sleep(40);
-	assert.equal(monthCard.getAttribute("data-dragging"), "true", "dragged card dimmed");
-	// Hover the balance card: a dashed ghost placeholder appears at its slot.
-	q(".u_widget[data-widget=balance]").dispatchEvent(new dom.window.Event("dragover", { bubbles: true, cancelable: true }));
+	const head = q("[data-dsh-usage-panel] .u_card[data-widget=heatmap] .u_cardHead");
+	assert.ok(head !== null, "header is a button");
+	assert.equal(head.tagName, "BUTTON", "whole header row is the click target");
+	assert.equal(head.getAttribute("aria-expanded"), "true");
+	assert.equal(qa("[data-dsh-usage-panel] .u_wIconBtn").length, 0, "no pin/hide buttons");
+	assert.equal(qa("[data-dsh-usage-panel] [draggable]").length, 0, "cards are not draggable");
+	assert.equal(qa("[data-dsh-usage-panel] .u_ghost").length, 0, "no drag ghost");
+	head.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(60);
-	const ghost = q(".u_widget[data-widget=__ghost__]");
-	assert.ok(ghost !== null, "ghost placeholder shown");
-	// Drop commits the reorder once.
-	monthCard.dispatchEvent(new dom.window.Event("dragend", { bubbles: true }));
-	await sleep(100);
-	assert.equal(q(".u_widget[data-widget=__ghost__]"), null, "ghost removed after drop");
-	const order = [...qa("[data-dsh-usage-panel] .u_widget")].map((el) => el.getAttribute("data-widget")).filter((id) => id !== null);
-	assert.ok(order.indexOf("month") < order.indexOf("balance"), "month moved before balance");
-	assert.equal(monthCard.getAttribute("data-dragging"), null, "dim state cleared");
+	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=heatmap]").getAttribute("data-collapsed"), "true");
+	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=heatmap] .u_cardBody"), null, "body removed when collapsed");
+	assert.equal(head.getAttribute("aria-expanded"), "false");
+});
+
+await test("usage rows carry a per-day cost and a hover composition bar", async () => {
+	await freshMount();
+	await openPanel();
+	const row = q("[data-dsh-usage-panel] .u_card[data-widget=recent] .u_day");
+	assert.ok(row !== null, "day row rendered");
+	assert.equal(row.querySelector(".u_dayDate").textContent.length > 0, true, "date column");
+	assert.equal(row.querySelector(".u_dayTokens").textContent, "1.1k", "tokens column");
+	assert.equal(row.querySelector(".u_dayHit").textContent, "87%", "hit column");
+	assert.equal(row.querySelector(".u_dayCost").textContent, "¥3.00", "per-day spend column");
+	const bar = row.querySelector(".u_dayBar");
+	assert.ok(bar !== null, "composition bar lives in the row (shown on hover/focus)");
+	assert.equal(bar.querySelectorAll(".u_barSeg").length, 3, "input / cacheRead / output segments");
+	const foot = q("[data-dsh-usage-panel] .u_card[data-widget=recent] .u_recentFoot");
+	assert.ok(foot !== null, "footer meta present");
+	assert.ok(foot.textContent.includes(t("usage.cumulativeHit").replace("{value}", "")), "cumulative hit rate");
+	assert.ok(foot.textContent.includes(t("usage.cumulativeTokens").replace("{value}", "")), "cumulative tokens");
+	assert.ok(foot.textContent.includes("¥3.00"), "cumulative spend");
+	assert.equal(qa("[data-dsh-usage-panel] .u_legendItem").length, 3, "three-segment legend in the footer");
 });
 
 await test("gear toggles the panel and the refresh button sits beside it", async () => {
@@ -427,30 +402,34 @@ await test("dock grip drags the dock vertically and persists", async () => {
 	assert.equal(dock.style.bottom, "132px", "no movement after release");
 });
 
-await test("collapse hides a widget body, hide removes it and restore brings it back", async () => {
+await test("collapsing a card persists across remounts", async () => {
 	await freshMount();
 	await openPanel();
-	await sleep(100);
-	// Collapse today.
-	const todayWidget = q("[data-dsh-usage-panel] .u_widget[data-widget=today]");
-	todayWidget.querySelector(".u_widgetTitle").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(80);
-	assert.equal(todayWidget.querySelector(".u_wBody"), null, "collapsed body removed");
-	// Expand again.
-	todayWidget.querySelector(".u_widgetTitle").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(80);
-	assert.ok(todayWidget.querySelector(".u_wBody") !== null, "expanded body restored");
-	// Hide hit.
-	const hitWidget = q("[data-dsh-usage-panel] .u_widget[data-widget=hit]");
-	const hideButton = [...hitWidget.querySelectorAll(".u_wIconBtn")].find((b) => b.getAttribute("aria-label") === t("action.hide"));
-	hideButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(80);
-	assert.equal(q("[data-dsh-usage-panel] .u_widget[data-widget=hit]"), null, "hidden widget gone from panel");
-	assert.ok(q("[data-dsh-usage-panel]").textContent.includes("已隐藏 1 项"), "hidden manager shows count");
-	// Restore.
-	q("[data-dsh-usage-panel] .u_restore").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(80);
-	assert.ok(q("[data-dsh-usage-panel] .u_widget[data-widget=hit]") !== null, "widget restored");
+	q("[data-dsh-usage-panel] .u_card[data-widget=heatmap] .u_cardHead").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(60);
+	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=heatmap]").getAttribute("data-collapsed"), "true");
+	// Remount keeps the preference (localStorage), without opening the panel.
+	if (currentRoot !== null) currentRoot.unmount();
+	const container = document.getElementById("root");
+	container.innerHTML = "";
+	currentRoot = createRoot(container);
+	currentRoot.render(react.createElement(UsagePanel, { wide: true, t }));
+	await sleep(150);
+	await openPanel();
+	assert.equal(q("[data-dsh-usage-panel] .u_card[data-widget=heatmap]").getAttribute("data-collapsed"), "true", "collapsed state persisted");
+});
+
+await test("Escape and an outside click close the panel", async () => {
+	await freshMount();
+	await openPanel();
+	assert.ok(q("[data-dsh-usage-panel]") !== null, "open first");
+	document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+	await sleep(60);
+	assert.equal(q("[data-dsh-usage-panel]"), null, "Escape closes");
+	await openPanel();
+	q("[data-dsh-usage-dock]").dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true }));
+	await sleep(60);
+	assert.equal(q("[data-dsh-usage-panel]"), null, "a pointerdown outside closes");
 });
 
 await test("colors come from the DSH theme, with no customizer left", async () => {
@@ -482,12 +461,13 @@ await test("a failed balance query names the real reason instead of a generic er
 		fetchedAt: Date.now()
 	};
 	await freshMount();
-	// Dock: neutral dash plus the reason as a tooltip — not a scary "!".
-	const row = q(".u_dockItem[data-widget=balance]");
-	const value = row.querySelector(".u_floatValue");
+	// Dock: a neutral dash plus a warning dot that keeps the reason in a tooltip.
+	const value = q(".u_balanceLineValue");
 	assert.equal(value.textContent, "—", "dock shows a neutral dash");
 	assert.equal(value.getAttribute("data-tone"), null, "a credential failure is not painted red");
-	assert.ok((row.getAttribute("title") ?? "").includes("HTTP 401"), "reason kept as a tooltip");
+	const warn = q(".u_warnDot");
+	assert.ok(warn !== null, "warning dot present");
+	assert.ok((warn.getAttribute("title") ?? "").includes("HTTP 401"), "reason kept as a tooltip");
 	await openPanel();
 	const text = q("[data-dsh-usage-panel]").textContent;
 	assert.ok(text.includes(t("balance.unauthorized")), "status label shown");
@@ -507,6 +487,9 @@ await test("switching provider shows its not-configured state", async () => {
 	const panel = q("[data-dsh-usage-panel]");
 	assert.ok(panel.textContent.includes("OPENROUTER_MANAGEMENT_KEY"), "missing credential ref shown");
 	assert.ok(fetchCalls.some((url) => url.includes("/api/usage/balance?provider=openrouter")), "balance fetched for switched provider");
+	const options = [...q("[data-dsh-usage-panel] .u_providerSelect").options].map((option) => option.value);
+	assert.deepEqual(options, ["deepseek-official", "openrouter"], "only configured providers are listed");
+	assert.ok(!options.includes("zai"), "unconfigured providers never appear");
 });
 
 await test("clicking a recent day opens the model breakdown", async () => {
@@ -519,6 +502,9 @@ await test("clicking a recent day opens the model breakdown", async () => {
 	await sleep(50);
 	const panel = q("[data-dsh-usage-panel]");
 	assert.ok(panel.textContent.includes("deepseek-official/deepseek-v4-pro"), "model breakdown rendered");
+	assert.ok(panel.querySelector(".u_detailSummary") !== null, "day summary line present");
+	assert.ok(qa("[data-dsh-usage-panel] .u_modelRow .u_bar").length >= 1, "each model row gets a composition bar");
+	assert.ok(panel.querySelector(".u_modelCost") !== null, "per-model spend rendered");
 	const backButton = q("[data-dsh-usage-panel] .u_back");
 	assert.ok(backButton !== null, "back button present");
 	assert.equal(backButton.getAttribute("aria-label"), t("action.back"));
@@ -534,7 +520,7 @@ await test("closing the panel keeps the dock alive", async () => {
 	await sleep(80);
 	assert.equal(q("[data-dsh-usage-panel]"), null, "panel closed");
 	assert.ok(q("[data-dsh-usage-dock]") !== null, "dock persists");
-	assert.equal(qa(".u_dockItem").length, 4, "pinned compacts persist");
+	assert.ok(q(".u_dockCard") !== null, "spend card persists");
 });
 
 await test("legacy-only coverage stays quiet: exact subtotals, disclosure without warning dot", async () => {
@@ -562,17 +548,19 @@ await test("legacy-only coverage stays quiet: exact subtotals, disclosure withou
 	q('.u_coverageSummary').click();
 	assert.equal(notice.open, false, "second click collapses the explanation");
 	assert.equal(fetchCalls.length, callsBeforeExpand, "disclosure does not reload data");
-	assert.equal(q('.u_widget[data-widget=today] .u_statBig').textContent, "1.1k");
-	assert.equal(q('.u_dockItem[data-widget=month] .u_floatValue').textContent, "1.1k");
+	assert.equal(q(".u_metricValue").textContent, "1.1k");
+	assert.equal(qa(".u_metricValue")[1].textContent, "87%");
 	assert.ok(!q('[data-dsh-usage-panel]').textContent.includes("≥"), "values are exact subtotals, not lower bounds");
-	assert.ok(q('.u_dualBar') !== null, "legacy-only coverage still renders the channel share");
-	assert.equal(q('.u_widget[data-widget=balance] .u_balanceAmount').textContent, "¥128.00");
+	q(".u_card[data-widget=dual] .u_cardHead").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(60);
+	assert.ok(q(".u_card[data-widget=dual] .u_dualBar") !== null, "legacy-only coverage still renders the channel share");
+	assert.equal(q('.u_card[data-widget=balance] .u_balanceAmount').textContent, "¥128.00");
 	usageResponse = () => okResponse(USAGE);
 	q('.u_coverageSummary').click();
 	q('.u_coverageDetails .u_retry').click();
 	await sleep(100);
 	assert.equal(q('.u_coverage'), null, "retry removes the notice when coverage recovers");
-	assert.equal(q('.u_widget[data-widget=today] .u_statBig').textContent, "1.1k");
+	assert.equal(q(".u_metricValue").textContent, "1.1k");
 });
 
 await test("non-legacy coverage keeps the warning dot and the partial explanation", async () => {
@@ -587,7 +575,9 @@ await test("non-legacy coverage keeps the warning dot and the partial explanatio
 	assert.equal(q('.u_coverageLabel').textContent, "部分统计 · 1 条会话未计入");
 	q('.u_coverageSummary').click();
 	assert.equal(q('.u_coverageText').textContent, "已排除无法读取的会话，数值为可读小计");
-	assert.equal(q('.u_dualBar'), null, "actionable skips still block the channel share");
+	q(".u_card[data-widget=dual] .u_cardHead").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(60);
+	assert.equal(q(".u_card[data-widget=dual] .u_dualBar"), null, "actionable skips still block the channel share");
 });
 
 await test("all unreadable records show unavailable, never zero tokens or a zero activity heatmap", async () => {
@@ -595,12 +585,12 @@ await test("all unreadable records show unavailable, never zero tokens or a zero
 	await freshMount();
 	await openPanel();
 	await sleep(100);
-	assert.equal(q('.u_widget[data-widget=today] .u_statBig').textContent, "—");
-	assert.equal(q('.u_widget[data-widget=month] .u_statBig').textContent, "—");
+	assert.equal(q(".u_metricValue").textContent, "—");
+	assert.equal(q(".u_costValue").textContent, "—", "no spend without data");
 	assert.equal(q('.u_coverageLabel').textContent, "用量暂不可用 · 1 条会话未计入");
 	assert.ok(q('.u_coverageDetails').textContent.includes("未按零用量计算"));
 	assert.equal(q('.u_coverage').open, false);
-	assert.ok(q('.u_widget[data-widget=recent]').textContent.includes(t("usage.unavailable")));
+	assert.ok(q('.u_card[data-widget=recent]').textContent.includes(t("usage.unavailable")));
 	assert.equal(q('.u_heatGrid'), null);
 	usageResponse = () => okResponse(USAGE);
 });
@@ -611,13 +601,13 @@ await test("HTTP failure shows unavailable and balance stays independent", async
 	await openPanel();
 	await sleep(100);
 	assert.ok(q('.u_error').textContent.includes("HTTP 500"));
-	assert.equal(q('.u_widget[data-widget=today] .u_statBig').textContent, "—");
-	assert.equal(q('.u_widget[data-widget=balance] .u_balanceAmount').textContent, "¥128.00");
+	assert.equal(q(".u_metricValue").textContent, "—");
+	assert.equal(q('.u_card[data-widget=balance] .u_balanceAmount').textContent, "¥128.00");
 	usageResponse = () => okResponse(USAGE);
 	q('.u_error .u_retry').click();
 	await sleep(100);
 	assert.equal(q('.u_error'), null);
-	assert.equal(q('.u_widget[data-widget=today] .u_statBig').textContent, "1.1k");
+	assert.equal(q(".u_metricValue").textContent, "1.1k");
 });
 
 await test("failed refresh clears stale totals instead of presenting them as current statistics", async () => {
@@ -627,7 +617,7 @@ await test("failed refresh clears stale totals instead of presenting them as cur
 	usageResponse = () => ({ ok: false, status: 500 });
 	q('[data-dsh-usage-panel] .u_iconButton[aria-label="' + t("action.refresh") + '"]').click();
 	await sleep(100);
-	assert.equal(q('.u_widget[data-widget=today] .u_statBig').textContent, "—");
+	assert.equal(q(".u_metricValue").textContent, "—");
 	usageResponse = () => okResponse(USAGE);
 });
 
@@ -636,8 +626,9 @@ await test("genuinely empty successful usage still displays zero, without a cove
 	await freshMount();
 	await openPanel();
 	await sleep(100);
-	assert.equal(q('.u_widget[data-widget=today] .u_statBig').textContent, "0");
-	assert.equal(q('.u_error'), null);
+	assert.equal(q(".u_metricValue").textContent, "0", "empty usage shows a real zero");
+	assert.equal(q(".u_costValue").textContent, "—", "no priced day means no spend");
+	assert.equal(q(".u_error"), null);
 	usageResponse = () => okResponse(USAGE);
 });
 

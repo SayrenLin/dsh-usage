@@ -69,7 +69,7 @@ assert.ok(capturedDeclaration !== null, "declaration captured at import time");
 const clientExports = capturedDeclaration.factory(mockRequire);
 const {
 	UsagePanel, fmtTokens, fmtCompact, fmtCurrency, fmtHit, heatLevel,
-	heatColor, defaultSettings, normalizeSettings, createLoader,
+	heatColor, fmtMoney, fmtMoneyExact, fmtShare, splitCompact, defaultSettings, normalizeSettings, createLoader,
 	peakState, balanceHint, statusTextOf
 } = clientExports;
 
@@ -109,22 +109,37 @@ await test("pure formatters and heat helpers", async () => {
 	assert.equal(heatLevel(60, 100), 3);
 	assert.equal(heatLevel(90, 100), 4);
 	assert.ok(heatColor(4).includes("100%"), "max heat is full accent");
+	assert.equal(fmtMoney(null), "—");
+	assert.equal(fmtMoney(0), "¥0.00");
+	assert.equal(fmtMoney(3), "¥3.00");
+	assert.equal(fmtMoney(0.004), "<¥0.01");
+	assert.equal(fmtMoney(2.5, "USD"), "$2.50");
+	assert.equal(fmtShare(2, 3), "67%");
+	assert.equal(fmtShare(0, 0), "0%");
+	assert.equal(fmtMoneyExact(3.42168), "¥3.4217", "tooltips keep unrounded precision");
+	assert.equal(fmtMoneyExact(null), "—");
+	assert.deepEqual(splitCompact("988.0k"), ["988.0", "k"]);
+	assert.deepEqual(splitCompact("1.2M"), ["1.2", "M"]);
+	assert.deepEqual(splitCompact("999"), ["999", ""]);
+	assert.deepEqual(splitCompact("—"), ["—", ""]);
 });
 
-await test("settings: defaults, normalization, and persistence guard", async () => {
+await test("settings: only layout state survives", async () => {
 	const base = defaultSettings();
-	assert.equal("theme" in base, false, "colors come from DSH tokens, not user settings");
-	assert.deepEqual(base.order, ["balance", "today", "month", "hit", "dual", "recent", "heatmap"]);
-	assert.equal(base.widgets.balance.pinned, true);
-	assert.equal(base.widgets.heatmap.pinned, true, "preset mirrors the user's settings");
-	// Normalization clamps garbage and appends newly added widget ids.
-	const normalized = normalizeSettings({ theme: { accent: "#0ea5e9", opacity: 0.1 }, order: ["bogus", "balance"], widgets: { balance: { visible: false, pinned: true, collapsed: true } } });
-	assert.equal("theme" in normalized, false, "legacy theme keys are dropped on read");
-	assert.equal(normalized.dockOffset, 72, "missing dock offset keeps the default");
-	assert.deepEqual(normalized.order, ["balance", "today", "month", "hit", "dual", "recent", "heatmap"], "unknown ids dropped, new ids appended");
-	assert.equal(normalized.widgets.balance.visible, false);
-	assert.equal(normalized.widgets.today.visible, true, "missing widget state defaults");
-	assert.equal(normalized.widgets.heatmap.visible, true, "new widget defaults visible");
+	assert.equal("theme" in base, false, "colors come from DSH tokens");
+	assert.equal("order" in base, false, "card order is fixed");
+	assert.equal("widgets" in base, false, "card visibility is not user state");
+	assert.equal(base.dockOffset, 72);
+	assert.equal(base.collapsed.dual, true, "the channel split starts collapsed");
+	assert.equal(base.collapsed.recent, false);
+	assert.equal(base.collapsed.heatmap, false);
+	const normalized = normalizeSettings({ order: ["bogus"], widgets: { balance: { pinned: true } }, theme: { accent: "#0ea5e9" }, collapsed: { heatmap: true }, dockOffset: 9999 });
+	assert.equal("order" in normalized, false, "legacy keys are dropped");
+	assert.equal("widgets" in normalized, false);
+	assert.equal("theme" in normalized, false);
+	assert.equal(normalized.dockOffset, 800, "dock offset is clamped");
+	assert.equal(normalized.collapsed.heatmap, true, "kept preference survives");
+	assert.equal(normalized.collapsed.dual, true, "missing preference keeps the default");
 });
 
 await test("peak hours are judged in Beijing time, not the device zone", async () => {
@@ -156,18 +171,18 @@ await test("balance failures are explained instead of lumped into one label", as
 	assert.equal(balanceHint("unavailable", "", t), "", "no text means no invented hint");
 });
 
-await test("SSR: closed state renders only the floating dock", async () => {
+await test("SSR: the dock renders the spend card, not clickable rows", async () => {
 	const html = renderToString(react.createElement(UsagePanel, { wide: true, t }));
 	assert.ok(html.includes("data-dsh-usage-dock"), "dock rendered");
 	assert.ok(html.includes("u_dockFrame"), "framed container rendered");
-	assert.ok(html.includes("u_dockItem"), "pinned compact rows present");
-	assert.equal(/<button[^>]*u_dockItem/.test(html), false, "dock rows are display-only, not buttons");
-	assert.ok(html.includes('data-widget="balance"'), "rows still carry their widget id");
-	assert.ok(!html.includes("u_versionRow") && !html.includes("u_updateCard"), "no update UI in the dock");
-	assert.ok(html.includes("u_dockFooter"), "peak-hours footer still renders");
-	assert.ok(html.includes("u_dockDivider"), "dividers between rows");
-	assert.ok(html.includes(t("widget.balance")), "balance label present");
-	assert.ok(html.includes(t("widget.today")), "today label present");
+	assert.ok(html.includes("u_dockCard"), "spend card rendered");
+	assert.ok(html.includes("u_costValue"), "big spend number present");
+	assert.ok(html.includes("u_bandZone"), "billing band present");
+	assert.ok(html.includes("u_bandZone"), "band zones present");
+	assert.ok(html.includes("u_metricRow"), "today usage + cache hit columns present");
+	assert.equal(html.includes("u_dockItem"), false, "the four text rows are gone");
+	assert.equal(html.includes("u_dockPeak"), false, "the separate peak lamp is gone");
+	assert.equal(html.includes("u_peakPop"), false, "the peak popover is gone");
 	assert.ok(!html.includes("data-dsh-usage-panel"), "panel not rendered when closed");
 	assert.ok(!html.includes("u_rail"), "no sidebar badge remnants");
 });

@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PACKAGE = "dsh-usage";
-const FILES = ["lib/client.js", "lib/safe-fetch.js"];
+const FILES = ["lib/client.js", "lib/usage.js", "lib/index.js", "lib/safe-fetch.js"];
 
 const argv = process.argv.slice(2);
 const checkOnly = argv.includes("--check-only");

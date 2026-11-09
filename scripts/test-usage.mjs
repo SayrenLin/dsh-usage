@@ -14,7 +14,10 @@ import {
 	mergeHoursInto,
 	mergeInto,
 	renderUsage,
-	totalTokens
+	totalTokens,
+	isPeakAt,
+	bucketsCost,
+	OFF_PEAK_MULTIPLIER
 } from "../lib/usage.js";
 
 let passed = 0;
@@ -225,6 +228,54 @@ await test("mergeHoursInto combines sessions per day", () => {
 	mergeHoursInto(byHour, b.hours);
 	const expectedHour = new Date(DAY1).getHours();
 	assert.equal(byHour.get(dayKey(DAY1))[expectedHour], 45);
+});
+
+await test("peak windows follow the Beijing clock, not the host clock", () => {
+	// 2026-11-09 is a Monday. 02:00Z = 10:00 Beijing.
+	assert.equal(isPeakAt(Date.parse("2026-11-09T02:00:00Z")), true, "10:00 Beijing is peak");
+	assert.equal(isPeakAt(Date.parse("2026-11-09T03:59:00Z")), true, "11:59 Beijing is peak");
+	assert.equal(isPeakAt(Date.parse("2026-11-09T04:00:00Z")), false, "12:00 Beijing is off-peak");
+	assert.equal(isPeakAt(Date.parse("2026-11-09T05:59:00Z")), false, "13:59 Beijing is off-peak");
+	assert.equal(isPeakAt(Date.parse("2026-11-09T06:00:00Z")), true, "14:00 Beijing is peak");
+	assert.equal(isPeakAt(Date.parse("2026-11-09T10:00:00Z")), false, "18:00 Beijing is off-peak");
+	assert.equal(isPeakAt(Date.parse("2026-11-14T02:00:00Z")), false, "Saturday is off-peak");
+	// Friday 16:30 UTC is Saturday 00:30 Beijing: a UTC-based check would say peak.
+	assert.equal(isPeakAt(Date.parse("2026-11-13T16:30:00Z")), false, "Beijing weekend wins over the UTC weekday");
+	// Holidays are billed as off-peak when listed.
+	assert.equal(isPeakAt(Date.parse("2026-11-09T02:00:00Z"), new Set(["2026-11-09"])), false, "listed holiday is off-peak");
+});
+
+await test("spend splits peak at full price and off-peak at half", () => {
+	const state = createUsageState();
+	applyUsageDelta(state, [
+		header(Date.parse("2026-11-09T02:00:00Z"), "deepseek-flash"),
+		usageChunk(2, Date.parse("2026-11-09T02:00:00Z"), 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
+		usageChunk(3, Date.parse("2026-11-09T05:00:00Z"), 1, 2, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
+	]);
+	const pricing = { currency: "CNY", source: "official", prices: new Map([["deepseek-official/deepseek-flash", { input: 2, output: 8, cacheRead: 0.04, cacheWrite: 0 }]]) };
+	const out = renderUsage(state.days, state.hours, Date.now(), { pricing });
+	assert.equal(out.costMeta.currency, "CNY");
+	assert.deepEqual(out.days[0].cost, { total: 3, peak: 2, offPeak: 1 }, "1M peak @2 + 1M off-peak @1");
+	assert.deepEqual(out.total.cost, { total: 3, peak: 2, offPeak: 1 });
+	assert.equal(OFF_PEAK_MULTIPLIER, 0.5);
+	// The multiplier is a parameter, not a hard-coded 0.5.
+	const doubled = renderUsage(state.days, state.hours, Date.now(), { pricing, offPeakMultiplier: 1 });
+	assert.deepEqual(doubled.days[0].cost, { total: 4, peak: 2, offPeak: 2 });
+});
+
+await test("unpriced models never produce a partial spend number", () => {
+	const state = createUsageState();
+	applyUsageDelta(state, [
+		header(DAY1, "mystery-model", "custom-provider"),
+		usageChunk(2, DAY1, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
+	]);
+	const noPricing = renderUsage(state.days, state.hours, Date.now(), { pricing: null });
+	assert.equal(noPricing.days[0].cost, null, "no price table means no cost");
+	assert.equal(noPricing.costMeta, null);
+	const emptyPricing = renderUsage(state.days, state.hours, Date.now(), { pricing: { currency: "CNY", source: "official", prices: new Map() } });
+	assert.equal(emptyPricing.days[0].cost, null, "unknown model means null, not zero");
+	assert.deepEqual(emptyPricing.costMeta.unpriced, ["custom-provider/mystery-model"]);
+	assert.equal(bucketsCost({ inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, { input: 9, output: 27, cacheRead: 0.3, cacheWrite: 0 }), 9);
 });
 
 console.log(`\n${passed} usage tests passed`);
