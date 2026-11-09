@@ -411,13 +411,12 @@ await test("rail mode: balance button reveals the dock and scrim closes it", asy
 	await sleep(80);
 	assert.ok(q("[data-dsh-usage-dock]") !== null, "dock revealed on click");
 	assert.ok(q(".u_railScrim") !== null, "scrim present");
-	// Gear opens the detail panel from the dock.
+	// The dock gear opens the detail panel.
 	q(".u_dockSettings").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(100);
 	assert.ok(q("[data-dsh-usage-panel]") !== null, "detail panel opened from dock gear");
 	// Close the panel; scrim click collapses the dock back to the button.
-	const closeButton = [...qa("[data-dsh-usage-panel] .u_iconButton")].find((b) => b.getAttribute("aria-label") === t("action.close"));
-	closeButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 	await sleep(80);
 	q(".u_railScrim").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(80);
@@ -471,7 +470,10 @@ await test("Escape and an outside click close the panel", async () => {
 	await openPanel();
 	q("[data-dsh-usage-dock]").dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true }));
 	await sleep(60);
-	assert.equal(q("[data-dsh-usage-panel]"), null, "a pointerdown outside closes");
+	assert.ok(q("[data-dsh-usage-panel]") !== null, "clicking the dock keeps the panel open");
+	document.body.dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true }));
+	await sleep(60);
+	assert.equal(q("[data-dsh-usage-panel]"), null, "a pointerdown elsewhere closes");
 });
 
 await test("colors come from the DSH theme, with no customizer left", async () => {
@@ -553,8 +555,7 @@ await test("closing the panel keeps the dock alive", async () => {
 	await openPanel();
 	await sleep(100);
 	assert.ok(q("[data-dsh-usage-panel]") !== null, "panel open");
-	const closeButton = [...qa("[data-dsh-usage-panel] .u_iconButton")].find((b) => b.getAttribute("aria-label") === t("action.close"));
-	closeButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 	await sleep(80);
 	assert.equal(q("[data-dsh-usage-panel]"), null, "panel closed");
 	assert.ok(q("[data-dsh-usage-dock]") !== null, "dock persists");
@@ -649,8 +650,9 @@ await test("failed refresh clears stale totals instead of presenting them as cur
 	await openPanel();
 	await sleep(100);
 	usageResponse = () => ({ ok: false, status: 500 });
-	q('[data-dsh-usage-panel] .u_iconButton[aria-label="' + t("action.refresh") + '"]').click();
-	await sleep(100);
+	// No in-panel refresh control any more: remount, which refetches and must clear.
+	await freshMount();
+	await sleep(120);
 	assert.equal(q(".u_metricValue").textContent, "—");
 	usageResponse = () => okResponse(USAGE);
 });
