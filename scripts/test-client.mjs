@@ -87,7 +87,7 @@ clientExports.apply(captureCtx);
 const t = (key) => captured.dictionaries?.zh[key] ?? key;
 
 await test("module loader captures the dsh-usage declaration", async () => {
-	assert.equal(capturedDeclaration.id, "dsh-usage");
+	assert.equal(capturedDeclaration.id, "dsh-usage-dock");
 	assert.equal(typeof clientExports.apply, "function");
 	assert.deepEqual(clientExports.inject, ["slots", "locale"]);
 	assert.equal(typeof UsagePanel, "function");
@@ -197,7 +197,7 @@ await test("plugin body registers dictionaries and the sidebar footer slot", asy
 	assert.equal(typeof captured.dictionaries.zh["widget.balance"], "string");
 	assert.equal(typeof captured.dictionaries.en["widget.balance"], "string");
 	assert.equal(captured.slot.spec.id, "usage");
-	assert.equal(captured.slot.spec.locale, "dsh-usage");
+	assert.equal(captured.slot.spec.locale, "dsh-usage-dock");
 	assert.equal(captured.slot.spec.order, 10);
 	assert.equal(typeof captured.slot.component, "function");
 });
@@ -240,23 +240,23 @@ await test("real DSH client module loader materializes the bundle", async () => 
 			"react/jsx-runtime": jsxRuntime,
 			"@deepseek-ai/dsh-client-ui-primitives": primitives
 		},
-		modules: [{ id: "dsh-usage", url: "/plugins/dsh-usage/client.js?rev=test", rev: "test", inject: ["@deepseek-ai/dsh-client-locale"] }],
+		modules: [{ id: "dsh-usage-dock", url: "/plugins/dsh-usage-dock/client.js?rev=test", rev: "test", inject: ["@deepseek-ai/dsh-client-locale"] }],
 		loadBundle: async () => {
 			globalThis.window = loaderContext;
 			(0, eval)(readFileSync(join(here, "..", "lib", "client.js"), "utf8"));
 		}
 	});
-	const row = system.graphRows.get("dsh-usage");
+	const row = system.graphRows.get("dsh-usage-dock");
 	await system.arrive(row);
-	const record = system.materialize("dsh-usage");
-	assert.equal(record.id, "dsh-usage");
+	const record = system.materialize("dsh-usage-dock");
+	assert.equal(record.id, "dsh-usage-dock");
 	assert.equal(typeof record.exports.apply, "function");
 	assert.deepEqual(record.exports.inject, ["slots", "locale"]);
 	assert.equal(typeof record.exports.UsagePanel, "function");
 	assert.ok(record.edges.has("react"), "react edge recorded");
 	assert.ok(record.edges.has("react/jsx-runtime"), "jsx-runtime edge recorded");
 	assert.ok(record.edges.has("@deepseek-ai/dsh-client-ui-primitives"), "primitives edge recorded");
-	const imported = await system.import("dsh-usage");
+	const imported = await system.import("dsh-usage-dock");
 	assert.equal(imported, record.exports);
 });
 

@@ -22,7 +22,7 @@ assert.equal(server.PROVIDERS_PATH, "/api/usage/providers");
 assert.equal(server.BALANCE_PATH, "/api/usage/balance");
 assert.equal(pkg.dsh.client.platform, "web");
 assert.deepEqual(pkg.dsh.client.inject, ["@deepseek-ai/dsh-client-locale", runtimePackage]);
-assert.match(readFileSync(join(root, "cordis.patch.yml"), "utf8"), /^- insert:\r?\n    - id: usage\r?\n      name: dsh-usage\s*$/m);
+assert.match(readFileSync(join(root, "cordis.patch.yml"), "utf8"), /^- insert:\r?\n    - id: usage\r?\n      name: dsh-usage-dock\s*$/m);
 
 assert.equal(
 	pkg.dependencies?.[runtimePackage],
