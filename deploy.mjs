@@ -21,7 +21,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PACKAGE = "dsh-usage";
+const PACKAGE = "dsh-usage-dock";
+/** Pre-rename package name: an older install still lives under it. */
+const LEGACY_PACKAGE = "dsh-usage";
 const FILES = ["lib/client.js", "lib/usage.js", "lib/index.js", "lib/safe-fetch.js"];
 
 const argv = process.argv.slice(2);
@@ -42,11 +44,15 @@ function dshHome() {
 	return resolve(home);
 }
 
-const target = join(dshHome(), "profiles", profile, "node_modules", PACKAGE);
+const installed = join(dshHome(), "profiles", profile, "node_modules");
+const target = existsSync(join(installed, PACKAGE))
+	? join(installed, PACKAGE)
+	: join(installed, LEGACY_PACKAGE);
 if (!existsSync(target)) {
-	console.error(`deploy: ${PACKAGE} is not installed in profile "${profile}" (${target})`);
+	console.error(`deploy: ${PACKAGE} is not installed in profile "${profile}" (${join(installed, PACKAGE)})`);
 	process.exit(2);
 }
+if (target.endsWith(LEGACY_PACKAGE)) console.warn(`deploy: profile still has the pre-rename ${LEGACY_PACKAGE}; deploying into it. Reinstall to migrate.`);
 
 const scratch = mkdtempSync(join(target, ".deploy-"));
 let deployed = 0;

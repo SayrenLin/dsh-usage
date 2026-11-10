@@ -1,8 +1,8 @@
-# dsh-usage
+# dsh-usage-dock
 
 DeepSeek Harness（`dsh web` / Windows 桌面版）的用量与余额悬浮卡：今天花了多少、花在哪个时段、每个会话花了多少，一眼看到。
 
-> 这是基于 [Ychris12138/dsh-usage-stats](https://github.com/Ychris12138/dsh-usage-stats)（MIT）大幅重写的衍生版：界面、数据口径与功能都做过调整，与原版不完全一致。
+> 本仓库 fork 自 [Aisland-SJL/dsh-usage](https://github.com/Aisland-SJL/dsh-usage)（MIT），在其基础上大幅重写：界面、数据口径与功能都做过调整，与原版不完全一致。
 
 ## 预览
 
@@ -48,9 +48,9 @@ DeepSeek Harness（`dsh web` / Windows 桌面版）的用量与余额悬浮卡�
 
 要求 DSH `>= 0.2.1-rc.2`。
 
-**从 Market**：在 DSH 的 Market 里搜索 `dsh-usage` 安装。
+**从 Market**：在 DSH 的 Market 里搜索 `dsh-usage-dock` 安装。
 
-**手动**：下载 Release 里的 `dsh-usage.tgz`，在 DSH 插件页选择本地安装。
+**手动**：下载 Release 里的 `dsh-usage-dock.tgz`，在 DSH 插件页选择本地安装。
 
 ## 数据与隐私
 

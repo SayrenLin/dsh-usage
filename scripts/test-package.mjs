@@ -13,7 +13,7 @@ const runtimePackage = "@deepseek-ai/dsh-client-ui-primitives";
 
 // Optional root lets release checks inspect the installed final TGZ, not the checkout.
 const server = await import(pathToFileURL(join(root, "lib", "index.js")).href);
-assert.equal(pkg.name, "dsh-usage");
+assert.equal(pkg.name, "dsh-usage-dock");
 assert.equal(server.name, "usage");
 assert.equal(typeof server.apply, "function");
 assert.deepEqual(server.inject, ["webServer", "credentials", "sessions", "sessionPersistence", "settings", "llm"]);
