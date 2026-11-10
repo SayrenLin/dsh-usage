@@ -206,9 +206,9 @@ function setNativeValue(element, value) {
 
 const q = (selector) => document.querySelector(selector);
 
-/** Open the detail panel the only way that still exists: the dock gear. */
+/** Open the detail panel the only way that still exists: the balance row. */
 async function openPanel() {
-	q(".u_dockSettings").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	q(".u_balanceLine").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(120);
 }
 const qa = (selector) => [...document.querySelectorAll(selector)];
@@ -362,19 +362,19 @@ await test("hit-rate arrow compares against the previous refresh", async () => {
 	bumped.days[0].tokens = 5000;
 	bumped.total.cacheHitRate = 90;
 	usageResponse = () => okResponse(bumped);
-	q(".u_dockRefresh").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	dom.window.dispatchEvent(new dom.window.Event("focus"));
 	await sleep(150);
 	const up = q("[data-dsh-usage-dock] .u_trend");
 	assert.ok(up !== null && up.getAttribute("data-trend") === "up", "rise is reported as up");
 	assert.equal(up.textContent, "", "geometry only, no glyph");
 	const baseline = JSON.parse(JSON.stringify(USAGE));
 	usageResponse = () => okResponse(JSON.parse(JSON.stringify(baseline)));
-	q(".u_dockRefresh").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	dom.window.dispatchEvent(new dom.window.Event("focus"));
 	await sleep(150);
 	const down = q("[data-dsh-usage-dock] .u_trend");
 	assert.equal(down.getAttribute("data-trend"), "down", "fall is reported as down");
 	// Same rate again → flat square.
-	q(".u_dockRefresh").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	dom.window.dispatchEvent(new dom.window.Event("focus"));
 	await sleep(150);
 	const flat = q("[data-dsh-usage-dock] .u_trend");
 	assert.equal(flat.getAttribute("data-trend"), "flat", "unchanged rate is flat");
@@ -382,15 +382,15 @@ await test("hit-rate arrow compares against the previous refresh", async () => {
 	usageResponse = () => okResponse(USAGE);
 });
 
-await test("gear toggles the panel and the refresh button sits beside it", async () => {
+await test("the balance row toggles the panel", async () => {
 	await freshMount();
-	assert.ok(q(".u_dockRefresh") !== null, "refresh button beside gear");
-	q(".u_dockSettings").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-	await sleep(100);
-	assert.ok(q("[data-dsh-usage-panel]") !== null, "panel opened via gear");
-	q(".u_dockSettings").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	assert.equal(q(".u_dockRefresh"), null, "no refresh button in the dock");
+	assert.equal(q(".u_dockSettings"), null, "no gear in the dock");
+	await openPanel();
+	assert.ok(q("[data-dsh-usage-panel]") !== null, "panel opened from the balance row");
+	q(".u_balanceLine").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(80);
-	assert.equal(q("[data-dsh-usage-panel]"), null, "second gear click closes the panel");
+	assert.equal(q("[data-dsh-usage-panel]"), null, "a second click closes it again");
 });
 
 await test("rail mode: balance button reveals the dock and scrim closes it", async () => {
@@ -412,7 +412,7 @@ await test("rail mode: balance button reveals the dock and scrim closes it", asy
 	assert.ok(q("[data-dsh-usage-dock]") !== null, "dock revealed on click");
 	assert.ok(q(".u_railScrim") !== null, "scrim present");
 	// The dock gear opens the detail panel.
-	q(".u_dockSettings").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	q(".u_balanceLine").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(100);
 	assert.ok(q("[data-dsh-usage-panel]") !== null, "detail panel opened from dock gear");
 	// Close the panel; scrim click collapses the dock back to the button.
@@ -422,25 +422,6 @@ await test("rail mode: balance button reveals the dock and scrim closes it", asy
 	await sleep(80);
 	assert.equal(q("[data-dsh-usage-dock]"), null, "dock collapsed after scrim click");
 	assert.ok(q("[data-dsh-usage-rail]") !== null, "rail button back");
-});
-
-await test("dock grip drags the dock vertically and persists", async () => {
-	await freshMount();
-	const grip = q(".u_dockGrip");
-	assert.ok(grip !== null, "grip present top-left");
-	const dock = q("[data-dsh-usage-dock]");
-	assert.equal(dock.style.bottom, "72px", "default offset");
-	// Drag up 60px.
-	grip.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientY: 200 }));
-	grip.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientY: 140 }));
-	await sleep(50);
-	assert.equal(dock.style.bottom, "132px", "dock moved up 60px");
-	// Release: further moves do nothing.
-	grip.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true }));
-	await sleep(30);
-	grip.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientY: 100 }));
-	await sleep(50);
-	assert.equal(dock.style.bottom, "132px", "no movement after release");
 });
 
 await test("collapsing a card persists across remounts", async () => {
@@ -666,6 +647,105 @@ await test("genuinely empty successful usage still displays zero, without a cove
 	assert.equal(q(".u_costValue").textContent, "—", "no priced day means no spend");
 	assert.equal(q(".u_error"), null);
 	usageResponse = () => okResponse(USAGE);
+});
+
+//#region empty states and keyboard
+
+const EMPTY_USAGE = { ...USAGE, days: [], total: { tokens: 0 } };
+
+await test("an undefined hit rate reads as a dash, with no invented trend chip", async () => {
+	usageResponse = () => okResponse(EMPTY_USAGE);
+	await freshMount();
+	const hit = qa(".u_metricValue")[1];
+	assert.equal(hit.textContent, "—", "no requests means no rate, not 0%");
+	assert.equal(q(".u_trend"), null, "Number(null) must not draw a flat chip");
+	assert.ok((hit.getAttribute("title") ?? "").includes(t("usage.noRequestsToday")), "the dash explains itself");
+	usageResponse = () => okResponse(USAGE);
+});
+
+await test("a priced provider covering an idle day spends a real zero", async () => {
+	usageResponse = () => okResponse(EMPTY_USAGE);
+	await freshMount();
+	assert.equal(q(".u_costValue").textContent, "¥0.00", "nothing spent is a number, not a dash");
+	assert.equal(qa(".u_metricValue")[0].textContent, "0", "an idle day still counts zero tokens");
+	usageResponse = () => okResponse(USAGE);
+});
+
+await test("an unpriced provider keeps the dash instead of claiming zero spend", async () => {
+	usageResponse = () => okResponse({ ...EMPTY_USAGE, costMeta: void 0 });
+	await freshMount();
+	assert.equal(q(".u_costValue").textContent, "—", "no pricing table means no number at all");
+	usageResponse = () => okResponse(USAGE);
+});
+
+await test("an empty window explains itself and drops the meaningless legend", async () => {
+	usageResponse = () => okResponse(EMPTY_USAGE);
+	await freshMount();
+	await openPanel();
+	assert.equal(q(".u_heatEmpty")?.textContent, t("heat.noData"), "the empty grid says so in words");
+	assert.equal(q(".u_heatLegend"), null, "a legend with nothing to explain is noise");
+	assert.ok(q(".u_heatDetail")?.textContent.includes(t("usage.noDay")), "a day without records resolves its text");
+	assert.ok(!q("[data-dsh-usage-panel]").textContent.includes("usage.noDay"), "never a raw key");
+	usageResponse = () => okResponse(USAGE);
+});
+
+await test("the balance row opens the panel from the keyboard", async () => {
+	await freshMount();
+	const line = q(".u_balanceLine");
+	assert.equal(line.getAttribute("role"), "button", "declared as a control");
+	assert.equal(line.getAttribute("tabindex"), "0", "reachable by Tab");
+	line.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+	await sleep(150);
+	assert.ok(q("[data-dsh-usage-panel]") !== null, "Enter opens the panel");
+	assert.equal(q(".u_panel").getAttribute("role"), "dialog", "the panel carries dialog semantics");
+	assert.equal(q(".u_balanceLine").getAttribute("aria-expanded"), "true");
+});
+
+await test("arrow keys move the heatmap selection inside one tab stop", async () => {
+	await freshMount();
+	await openPanel();
+	const grid = q(".u_heatCalendar");
+	assert.equal(grid.getAttribute("role"), "grid");
+	assert.equal(qa(".u_heatCell[tabindex='0']").length, 1, "roving tab stop: exactly one cell");
+	const before = q(".u_heatCell[data-selected]").getAttribute("data-heat-date");
+	grid.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+	await sleep(60);
+	const after = q(".u_heatCell[data-selected]").getAttribute("data-heat-date");
+	assert.notEqual(after, before, "ArrowUp moves to the previous weekday");
+	assert.equal(qa(".u_heatCell[tabindex='0']").length, 1, "still a single tab stop");
+});
+
+await test("the spend figure wears a peak/off-peak badge", async () => {
+	await freshMount();
+	const peak = q(".u_costValue").getAttribute("data-peak");
+	const pill = q(".u_peakPill");
+	assert.ok(pill !== null, "badge sits beside the spend");
+	assert.equal(pill.getAttribute("data-peak"), peak, "same state as the figure it labels");
+	assert.equal(pill.textContent, peak === "yellow" ? t("cost.peak") : t("cost.offPeak"));
+	// A missing price is a dash; a peak/off-peak badge would explain nothing there.
+	usageResponse = () => okResponse({ ...EMPTY_USAGE, costMeta: void 0 });
+	await freshMount();
+	assert.equal(q(".u_costValue").textContent, "—");
+	assert.equal(q(".u_peakPill"), null, "no badge next to a dash");
+	usageResponse = () => okResponse(USAGE);
+});
+
+await test("a session row explains itself on hover, with no session id anywhere", async () => {
+	await freshMount();
+	await openPanel();
+	assert.equal(q(".u_modelName").getAttribute("title"), null, "the raw session id is gone");
+	q(".u_modelRow").dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+	await sleep(40);
+	const tip = q(".u_sessionTip");
+	assert.ok(tip !== null, "hovering the row opens one card");
+	const lines = [...tip.children].map((el) => el.textContent);
+	assert.deepEqual(lines.length, 3, "three lines");
+	assert.equal(lines[0], "800 tokens", "exact count, plural unit");
+	assert.equal(lines[1], "输入 100 · 输出 50", "input and output split, compact above 1000");
+	assert.equal(lines[2], "峰 ¥1.50 · 谷 ¥0.50", "peak and off-peak split");
+	q(".u_modelRow").dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+	await sleep(30);
+	assert.equal(q(".u_sessionTip"), null, "card hides on leave");
 });
 
 //#endregion

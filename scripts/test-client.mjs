@@ -99,9 +99,9 @@ await test("pure formatters and heat helpers", async () => {
 	assert.equal(fmtCompact(42800000), "42.8M");
 	assert.equal(fmtCompact(1400000000), "1.4B");
 	assert.equal(fmtCompact(999), "999");
-	assert.equal(fmtCompact("nope"), "–");
+	assert.equal(fmtCompact("nope"), "—", "one placeholder for a number that does not exist");
 	assert.equal(fmtCurrency(110.5, "CNY"), "¥110.50");
-	assert.equal(fmtHit(null), "–");
+	assert.equal(fmtHit(null), "—", "an undefined rate is not 0%");
 	assert.equal(fmtHit(12.3), "12.3%");
 	assert.equal(heatLevel(0, 100), 0);
 	assert.equal(heatLevel(10, 100), 1);
@@ -258,6 +258,24 @@ await test("real DSH client module loader materializes the bundle", async () => 
 	assert.ok(record.edges.has("@deepseek-ai/dsh-client-ui-primitives"), "primitives edge recorded");
 	const imported = await system.import("dsh-usage");
 	assert.equal(imported, record.exports);
+});
+
+await test("every translated key exists in both dictionaries", async () => {
+	const source = readFileSync(join(here, "..", "lib", "client.js"), "utf8");
+	const zhStart = source.indexOf("const zh = {");
+	const enStart = source.indexOf("const en = {");
+	assert.ok(zhStart > 0 && enStart > zhStart, "both dictionaries are present");
+	const zhBlock = source.slice(zhStart, enStart);
+	const enBlock = source.slice(enStart, source.indexOf("\n\t\t};", enStart));
+	const keysOf = (block) => [...block.matchAll(/^\s*"([\w.]+)":/gm)].map((match) => match[1]);
+	const zh = keysOf(zhBlock);
+	const en = keysOf(enBlock);
+	const used = new Set([...source.matchAll(/translate\(\s*"([\w.]+)"/g)].map((match) => match[1]));
+	// A key with no entry renders as the raw key ("usage.noDay") in the UI.
+	assert.deepEqual([...used].filter((key) => !zh.includes(key)), [], "no key used without a zh entry");
+	assert.deepEqual([...used].filter((key) => !en.includes(key)), [], "no key used without an en entry");
+	assert.deepEqual(zh.filter((key) => !en.includes(key)), [], "zh and en cover the same keys");
+	assert.deepEqual(en.filter((key) => !zh.includes(key)), [], "zh and en cover the same keys");
 });
 
 console.log(`\n${passed} client tests passed`);

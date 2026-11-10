@@ -93,12 +93,22 @@ const healthyAccount = {
 	fetchedAt: Date.now()
 };
 let account = healthyAccount;
+/** Flip to render the "covered day, no requests" state instead of the rich one. */
+let emptyUsage = false;
+const EMPTY_USAGE = {
+	ok: true,
+	days: [],
+	total: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, tokens: 0, cost: { total: 0, peak: 0, offPeak: 0 } },
+	costMeta: { currency: "CNY", source: "official", offPeakMultiplier: 0.5, unpriced: [] },
+	updatedAt: Date.now()
+};
 dom.window.fetch = async (input) => {
 	const url = String(input);
 	const ok = (data) => ({ ok: true, status: 200, json: async () => data });
 	if (url.includes("/api/usage/providers")) return ok({ ok: true, providers: PROVIDERS });
 	if (url.includes("/api/usage/balance")) return ok({ ok: true, account });
 	if (url.includes("/api/usage/usage")) {
+		if (emptyUsage) return ok(EMPTY_USAGE);
 		return ok({
 			ok: true,
 			days: [...Array.from({ length: 40 }, (_, index) => {
@@ -134,7 +144,7 @@ async function render() {
 	currentRoot = createRoot(container);
 	currentRoot.render(react.createElement(UsagePanel, { wide: true, t }));
 	await sleep(220);
-	document.querySelector(".u_dockSettings").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	document.querySelector(".u_balanceLine").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 	await sleep(200);
 	return { body: document.getElementById("root").innerHTML, css: document.head.textContent };
 }
@@ -165,15 +175,38 @@ body{margin:0;padding:28px;background:inherit}
 /* the mocked icon components render empty spans; give them a visible body */
 [data-icon]{display:inline-block;width:12px;height:12px;border-radius:3px;background:currentColor;opacity:.55}`;
 
-function doc(name, vars, body, css) {
+function doc(name, vars, body, css, extra = "") {
 	return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>${name}</title>
-<style>${vars}</style><style>${css}</style><style>${overrides}</style></head>
+<style>${vars}</style><style>${css}</style><style>${overrides}</style><style>${extra}</style></head>
 <body>${body}</body></html>`;
 }
 
 const healthy = await render();
 writeFileSync(join(root, ".preview", "panel-light.html"), doc("panel-light", lightVars, healthy.body, healthy.css), "utf8");
 writeFileSync(join(root, ".preview", "panel-dark.html"), doc("panel-dark", darkVars, healthy.body, healthy.css), "utf8");
+
+// Empty state: a covered day with no requests at all. This is the state that used
+// to mix 0, an en dash and an em dash in one card.
+emptyUsage = true;
+const empty = await render();
+writeFileSync(join(root, ".preview", "panel-empty.html"), doc("panel-empty", lightVars, empty.body, empty.css), "utf8");
+writeFileSync(join(root, ".preview", "panel-empty-natural.html"), doc("panel-empty", lightVars, empty.body, empty.css, ".u_panel{width:420px!important}"), "utf8");
+writeFileSync(join(root, ".preview", "dock-empty.html"), doc("dock-empty", lightVars, empty.body.replace('class="u_dockCard"', 'class="u_dockCard" data-expanded="true"'), `${empty.css}\n.u_panel{display:none!important}`), "utf8");
+emptyUsage = false;
+
+// Session hover card: jsdom reports every rect as 0, so park the card somewhere
+// visible after React has placed it.
+const sessionTip = await (async () => {
+	const snap = await render();
+	const row = document.querySelector(".u_modelRow");
+	if (row !== null) row.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+	await sleep(120);
+	return {
+		body: document.getElementById("root").innerHTML.replace("left: 0px; top: -6px", "left: 470px; top: 420px"),
+		css: document.head.textContent
+	};
+})();
+writeFileSync(join(root, ".preview", "panel-session-tip.html"), doc("panel-session-tip", lightVars, sessionTip.body, sessionTip.css, ".u_panel{width:420px!important}"), "utf8");
 
 // Drilldown preview: click the first usage row so the model view is captured.
 const detail = await (async () => {
