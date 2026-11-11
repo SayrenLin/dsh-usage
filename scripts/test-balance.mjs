@@ -4,7 +4,9 @@
  * Runs against a mock fetch; no network, no harness.
  */
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { balanceSchemeOf, queryBalance, supportedBalanceSchemes } from "../lib/balance.js";
+import { safeFetch } from "../lib/safe-fetch.js";
 
 let passed = 0;
 async function test(name, fn) {
@@ -165,6 +167,98 @@ await test("balanceSchemeOf maps adapter ids and pi-ai routes", () => {
 
 await test("supportedBalanceSchemes lists exactly four", () => {
 	assert.deepEqual(supportedBalanceSchemes().sort(), ["deepseek", "moonshot", "openrouter", "zai"]);
+});
+
+/** A transport whose request answers only when the test says so. */
+function hangingTransport() {
+	const record = {};
+	const transport = {
+		httpsRequest: (url, options, callback) => {
+			record.url = url;
+			const request = new EventEmitter();
+			request.end = () => {
+				record.ended = true;
+				if (record.onEnd !== void 0) record.onEnd(callback, request);
+			};
+			request.destroy = (error) => {
+				record.destroyed = error;
+			};
+			record.request = request;
+			record.callback = callback;
+			return request;
+		},
+		httpRequest: () => {
+			throw new Error("http transport must not be used");
+		}
+	};
+	return { transport, record };
+}
+
+const safeDeps = (transport, timeoutMs = 500) => ({
+	transport,
+	lookup: async () => [{ address: "1.2.3.4", family: 4 }],
+	timeoutMs
+});
+
+await test("safeFetch rejects when the response aborts mid-body", async () => {
+	const { transport, record } = hangingTransport();
+	record.onEnd = (callback) => {
+		const response = new EventEmitter();
+		response.statusCode = 200;
+		response.headers = {};
+		response.resume = () => {};
+		callback(response);
+		response.emit("data", Buffer.from('{"total":'));
+		response.emit("aborted");
+	};
+	await assert.rejects(
+		safeFetch("https://api.deepseek.com/user/balance", {}, safeDeps(transport, 5000)),
+		(error) => error.providerStatus === "unavailable" && /aborted/.test(error.message),
+		"an aborted body must settle instead of hanging the refresh"
+	);
+});
+
+await test("safeFetch rejects when the socket closes without end", async () => {
+	const { transport, record } = hangingTransport();
+	record.onEnd = (callback) => {
+		const response = new EventEmitter();
+		response.statusCode = 200;
+		response.headers = {};
+		response.resume = () => {};
+		callback(response);
+		response.emit("close");
+	};
+	await assert.rejects(
+		safeFetch("https://api.deepseek.com/user/balance", {}, safeDeps(transport, 5000)),
+		(error) => error.providerStatus === "unavailable" && /closed/.test(error.message),
+		"a premature close must settle instead of hanging"
+	);
+});
+
+await test("safeFetch times out a request that never answers", async () => {
+	const { transport, record } = hangingTransport();
+	await assert.rejects(
+		safeFetch("https://api.deepseek.com/user/balance", {}, safeDeps(transport, 40)),
+		(error) => error.providerStatus === "unavailable" && /timed out/.test(error.message),
+		"a silent upstream must not pin the promise forever"
+	);
+	assert.ok(record.destroyed !== void 0, "the dead request is destroyed");
+});
+
+await test("safeFetch resolves a complete body", async () => {
+	const { transport, record } = hangingTransport();
+	record.onEnd = (callback) => {
+		const response = new EventEmitter();
+		response.statusCode = 200;
+		response.headers = { "content-type": "application/json" };
+		callback(response);
+		response.emit("data", Buffer.from('{"is_available":true}'));
+		response.emit("end");
+	};
+	const result = await safeFetch("https://api.deepseek.com/user/balance", {}, safeDeps(transport, 5000));
+	assert.equal(result.status, 200);
+	assert.equal(result.ok, true);
+	assert.deepEqual(await result.json(), { is_available: true });
 });
 
 console.log(`\n${passed} balance tests passed`);

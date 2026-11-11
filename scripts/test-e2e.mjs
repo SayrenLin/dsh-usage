@@ -701,17 +701,37 @@ await test("the balance row opens the panel from the keyboard", async () => {
 	assert.equal(q(".u_balanceLine").getAttribute("aria-expanded"), "true");
 });
 
-await test("arrow keys move the heatmap selection inside one tab stop", async () => {
+await test("arrow keys move one cell in the direction the grid is drawn", async () => {
 	await freshMount();
 	await openPanel();
 	const grid = q(".u_heatCalendar");
 	assert.equal(grid.getAttribute("role"), "grid");
 	assert.equal(qa(".u_heatCell[tabindex='0']").length, 1, "roving tab stop: exactly one cell");
-	const before = q(".u_heatCell[data-selected]").getAttribute("data-heat-date");
+	const keyOf = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+	// Three weeks back lands in the middle of the window and is never future.
+	const base = new Date();
+	base.setHours(12, 0, 0, 0);
+	base.setDate(base.getDate() - 21);
+	const start = keyOf(base);
+	const cell = q(`.u_heatCell[data-heat-date="${start}"]`);
+	assert.ok(cell !== null, "the base cell is inside the eight-week window");
+	cell.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(60);
+	assert.equal(q(".u_heatCell[data-selected]").getAttribute("data-heat-date"), start);
+	// Right/Left change the week, Up/Down change the weekday: columns are weeks.
+	grid.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+	await sleep(60);
+	const nextWeek = new Date(base);
+	nextWeek.setDate(nextWeek.getDate() + 7);
+	assert.equal(q(".u_heatCell[data-selected]").getAttribute("data-heat-date"), keyOf(nextWeek), "ArrowRight advances one week");
+	grid.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+	await sleep(60);
+	const nextDay = new Date(nextWeek);
+	nextDay.setDate(nextDay.getDate() + 1);
+	assert.equal(q(".u_heatCell[data-selected]").getAttribute("data-heat-date"), keyOf(nextDay), "ArrowDown advances one weekday");
 	grid.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 	await sleep(60);
-	const after = q(".u_heatCell[data-selected]").getAttribute("data-heat-date");
-	assert.notEqual(after, before, "ArrowUp moves to the previous weekday");
+	assert.equal(q(".u_heatCell[data-selected]").getAttribute("data-heat-date"), keyOf(nextWeek), "ArrowUp comes back");
 	assert.equal(qa(".u_heatCell[tabindex='0']").length, 1, "still a single tab stop");
 });
 

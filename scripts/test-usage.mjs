@@ -307,4 +307,21 @@ await test("unpriced models never produce a partial spend number", () => {
 	assert.equal(bucketsCost({ inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, { input: 9, output: 27, cacheRead: 0.3, cacheWrite: 0 }), 9);
 });
 
+await test("a flat catalog price keeps its full rate off-peak", () => {
+	const state = createUsageState();
+	applyUsageDelta(state, [
+		header(Date.parse("2026-11-09T02:00:00Z"), "deepseek-chat", "openrouter"),
+		usageChunk(2, Date.parse("2026-11-09T02:00:00Z"), 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
+		usageChunk(3, Date.parse("2026-11-09T05:00:00Z"), 1, 2, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
+	]);
+	const pricing = {
+		currency: "CNY",
+		source: "catalog",
+		prices: new Map([["openrouter/deepseek-chat", { input: 2, output: 8, cacheRead: 0.04, cacheWrite: 0, peakAware: false }]])
+	};
+	const out = renderUsage(state.days, state.hours, Date.now(), { pricing });
+	// Both bands bill at the full rate; the split still follows the clock.
+	assert.deepEqual(out.days[0].cost, { total: 4, peak: 2, offPeak: 2 }, "a flat rate is not discounted at night");
+});
+
 console.log(`\n${passed} usage tests passed`);

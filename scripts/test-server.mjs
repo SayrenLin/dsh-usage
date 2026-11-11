@@ -11,7 +11,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apply, BALANCE_PATH, PROVIDERS_PATH, USAGE_PATH, isLoopbackAddress } from "../lib/index.js";
+import { apply, BALANCE_PATH, PROVIDERS_PATH, USAGE_PATH, isLoopbackAddress, pricingFor } from "../lib/index.js";
 import { isPrivateAddress, resolvePublicAddress, safeFetch } from "../lib/safe-fetch.js";
 
 const testHome = await mkdtemp(join(tmpdir(), "dsh-usage-test-"));
@@ -411,4 +411,36 @@ await test("isLoopbackAddress accepts IPv4, IPv4-mapped IPv6, and ::1", () => {
 //#endregion
 
 await rm(testHome, { recursive: true, force: true });
+//#region pricing
+
+/** Minimal context: no llm adapter, so only the official table can answer. */
+const bareCtx = { get: () => void 0 };
+
+await test("official CNY prices only apply to DeepSeek's own route", async () => {
+	const official = await pricingFor(bareCtx, ["deepseek-official/deepseek-flash"]);
+	const price = official.prices.get("deepseek-official/deepseek-flash");
+	assert.ok(price !== void 0, "the official route is priced from the CNY list");
+	assert.equal(price.peakAware, true, "the published list has an off-peak half price");
+	const foreign = await pricingFor(bareCtx, ["openrouter/deepseek-flash"]);
+	assert.equal(foreign.prices.get("openrouter/deepseek-flash"), void 0, "a resold DeepSeek model is not the official endpoint");
+});
+
+await test("catalog prices are converted from USD and marked flat", async () => {
+	const llm = {
+		registration: () => ({
+			adapter: { listModels: async () => [{ id: "deepseek-chat", cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 } }] }
+		})
+	};
+	const ctx = { get: (name) => (name === "llm" ? llm : void 0) };
+	// A distinct key: pricingFor memoizes by the sorted model set.
+	const pricing = await pricingFor(ctx, ["openrouter/deepseek-chat"]);
+	const price = pricing.prices.get("openrouter/deepseek-chat");
+	assert.ok(price !== void 0, "the catalog answers when the official table refuses");
+	assert.equal(price.peakAware, false, "a flat catalog rate must not get the peak discount");
+	assert.equal(pricing.source, "catalog");
+	const rate = price.input / 1;
+	assert.ok(rate > 6 && rate < 7, "USD is converted at the documented rate");
+});
+
+//#endregion
 console.log(`\n${passed} server tests passed`);
