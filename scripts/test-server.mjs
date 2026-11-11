@@ -84,7 +84,8 @@ async function boot(overrides = {}) {
 			settings: overrides.settings ?? SETTINGS,
 			credentials: overrides.credentials ?? credentials({ DEEPSEEK_API_KEY: "sk-test" }),
 			sessions: overrides.sessions ?? { list: () => [] },
-			sessionPersistence: overrides.persistence ?? { listSnapshots: async () => [], list: async () => [] }
+			sessionPersistence: overrides.persistence ?? { listSnapshots: async () => [], list: async () => [] },
+			deepseekAccount: overrides.account
 		})[service]
 	};
 	await apply(ctx, {}, {
@@ -443,4 +444,63 @@ await test("catalog prices are converted from USD and marked flat", async () => 
 });
 
 //#endregion
+//#region account login
+
+function fakeAccount(state, summary) {
+	return {
+		calls: 0,
+		async getState() {
+			return { status: state };
+		},
+		async getBalance(client) {
+			this.calls += 1;
+			this.lastClient = client;
+			return summary;
+		}
+	};
+}
+
+const ACCOUNT_SUMMARY = {
+	status: "ready",
+	value: [{ currency: "CNY", balance: "100.00" }],
+	bonusWallets: [{ currency: "CNY", balance: "10.00" }]
+};
+
+await test("account login is listed and reports platform wallets", async () => {
+	const account = fakeAccount("credential-stored", ACCOUNT_SUMMARY);
+	const { routes } = await boot({ account });
+	const providers = parsed(await call(handlerOf(routes, PROVIDERS_PATH))).providers;
+	const entry = providers.find((provider) => provider.id === "deepseek-account");
+	assert.ok(entry !== void 0, "the account route appears in the provider list");
+	assert.equal(entry.configured, true);
+	assert.equal(entry.mode, "account");
+	const body = parsed(await call(handlerOf(routes, BALANCE_PATH), { url: "/api/usage/balance?provider=deepseek-account" }));
+	assert.equal(body.account.status, "ok");
+	assert.equal(body.account.mode, "account");
+	assert.equal(body.account.balance.currency, "CNY");
+	assert.equal(body.account.balance.total, "110.00", "topped-up plus granted");
+	assert.equal(body.account.balance.toppedUp, "100.00");
+	assert.equal(body.account.balance.granted, "10.00");
+	assert.equal(account.calls, 1, "the host service answers instead of an HTTP key query");
+	assert.equal(typeof account.lastClient.timezoneOffsetSeconds, "number", "platform metadata is supplied");
+});
+
+await test("a signed-out account is reported as signed out, not as a missing provider", async () => {
+	const account = fakeAccount("signed-out", null);
+	const { routes } = await boot({ account });
+	const providers = parsed(await call(handlerOf(routes, PROVIDERS_PATH))).providers;
+	assert.equal(providers.find((provider) => provider.id === "deepseek-account").configured, false);
+	const body = parsed(await call(handlerOf(routes, BALANCE_PATH), { url: "/api/usage/balance?provider=deepseek-account" }));
+	assert.equal(body.account.status, "signed-out");
+	assert.equal(body.account.balance, null);
+});
+
+await test("without an account service the route is not advertised", async () => {
+	const { routes } = await boot();
+	const providers = parsed(await call(handlerOf(routes, PROVIDERS_PATH))).providers;
+	assert.ok(!providers.some((provider) => provider.id === "deepseek-account"), "no phantom provider");
+});
+
+//#endregion
+
 console.log(`\n${passed} server tests passed`);
