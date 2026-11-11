@@ -17,7 +17,8 @@ import {
 	totalTokens,
 	isPeakAt,
 	bucketsCost,
-	OFF_PEAK_MULTIPLIER
+	OFF_PEAK_MULTIPLIER,
+	PEAK_HOLIDAYS
 } from "../lib/usage.js";
 
 let passed = 0;
@@ -245,6 +246,30 @@ await test("peak windows follow the Beijing clock, not the host clock", () => {
 	assert.equal(isPeakAt(Date.parse("2026-11-09T02:00:00Z"), new Set(["2026-11-09"])), false, "listed holiday is off-peak");
 });
 
+await test("statutory holidays are off-peak even on a weekday", () => {
+	// 2026-02-17 is the Spring Festival, a Tuesday; 10:00 Beijing would be peak.
+	assert.equal(isPeakAt(Date.parse("2026-02-17T02:00:00Z")), false, "Spring Festival Tuesday is off-peak");
+	// The first working day after it (2026-02-24, Tuesday) is peak again.
+	assert.equal(isPeakAt(Date.parse("2026-02-24T02:00:00Z")), true, "the Tuesday after the break is peak");
+	assert.equal(isPeakAt(Date.parse("2026-10-05T02:00:00Z")), false, "National Day Monday is off-peak");
+	assert.equal(isPeakAt(Date.parse("2026-10-08T02:00:00Z")), true, "the Thursday after National Day is peak");
+	// 调休 make-up weekends stay off-peak: the weekend branch wins.
+	assert.equal(isPeakAt(Date.parse("2026-02-14T02:00:00Z")), false, "make-up Saturday is off-peak");
+	assert.equal(isPeakAt(Date.parse("2026-10-10T02:00:00Z")), false, "make-up Saturday in October is off-peak");
+	assert.equal(PEAK_HOLIDAYS.size, 33, "the 2026 table covers every statutory day");
+});
+
+await test("a weekday holiday is billed entirely at the off-peak price", () => {
+	const state = createUsageState();
+	applyUsageDelta(state, [
+		header(Date.parse("2026-02-17T02:00:00Z"), "deepseek-flash"),
+		usageChunk(2, Date.parse("2026-02-17T02:00:00Z"), 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
+	]);
+	const pricing = { currency: "CNY", source: "official", prices: new Map([["deepseek-official/deepseek-flash", { input: 2, output: 8, cacheRead: 0.04, cacheWrite: 0 }]]) };
+	const out = renderUsage(state.days, state.hours, Date.now(), { pricing });
+	assert.deepEqual(out.days[0].cost, { total: 1, peak: 0, offPeak: 1 }, "Spring Festival 10:00 is billed at half");
+});
+
 await test("spend splits peak at full price and off-peak at half", () => {
 	const state = createUsageState();
 	applyUsageDelta(state, [
@@ -261,6 +286,10 @@ await test("spend splits peak at full price and off-peak at half", () => {
 	// The multiplier is a parameter, not a hard-coded 0.5.
 	const doubled = renderUsage(state.days, state.hours, Date.now(), { pricing, offPeakMultiplier: 1 });
 	assert.deepEqual(doubled.days[0].cost, { total: 4, peak: 2, offPeak: 2 });
+	// The billing band travels with the payload so the dock cannot disagree.
+	assert.equal(renderUsage(state.days, state.hours, Date.now(), { pricing }).peak, null, "no verdict unless asked");
+	assert.equal(renderUsage(state.days, state.hours, Date.now(), { pricing, peakNow: true }).peak, "yellow");
+	assert.equal(renderUsage(state.days, state.hours, Date.now(), { pricing, peakNow: false }).peak, "green");
 });
 
 await test("unpriced models never produce a partial spend number", () => {
