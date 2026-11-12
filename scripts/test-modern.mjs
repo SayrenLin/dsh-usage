@@ -65,7 +65,7 @@ try {
 	await test("v2 read uses inclusive offset 0 and always closes", async () => {
 		const result = await collectUsage(ctx);
 		assert.equal(result.total.tokens, 107);
-		assert.equal(result.days[0].models[0].model, "deepseek-official/fixture-model");
+		assert.equal(result.days[0].tokens, 107);
 		assert.deepEqual(persistence.stats.reads, [0]);
 		assert.equal(persistence.stats.closes, 1);
 	});
@@ -77,6 +77,12 @@ try {
 		mutate(persistence, "parent", [header, settlement(1, 100), settlement(2, 10, { step: 2 })]);
 		assert.equal((await collectUsage(ctx)).total.tokens, 124);
 	});
+	await test("an append reads only the tail instead of the whole log", async () => {
+		mutate(persistence, "parent", [header, settlement(1, 100), settlement(2, 10, { step: 2 }), settlement(3, 10, { step: 3 }), settlement(4, 10, { step: 4 })]);
+		const before = persistence.stats.reads.length;
+		assert.equal((await collectUsage(ctx)).total.tokens, 158, "tail fold adds up to the same total");
+		assert.deepEqual(persistence.stats.reads.slice(before), [3], "reads from the last folded seq, not from zero");
+	});
 	await test("truncation and same-length rewrite replace cached counts", async () => {
 		mutate(persistence, "parent", [header, settlement(1, 30)]);
 		assert.equal((await collectUsage(ctx)).total.tokens, 37);
@@ -87,7 +93,7 @@ try {
 		persistence.records.set("child", { revision: Symbol("fork"), inherited: 2, events: [header, settlement(1, 60), settlement(2, 20, { type: "assistant/attempt", direct: false, step: 2 })] });
 		const result = await collectUsage(ctx);
 		assert.equal(result.total.tokens, 94);
-		assert.equal(result.days[0].models[0].model, "deepseek-official/fixture-model");
+		assert.equal("models" in result.days[0], false, "no per-model array on the wire");
 	});
 	await test("read failures close handles, exclude stale counts and report incomplete totals", async () => {
 		const record = persistence.records.get("child");
@@ -235,6 +241,48 @@ try {
 			assert.equal(body.account?.status ?? body.providers[0].status, "disabled");
 		}
 		assert.equal(reads, 0);
+	});
+	await test("a content-only change waits for the cache write window", async () => {
+		const root = join(home, "throttle-root");
+		process.env.DSH_HOME = root;
+		const local = store([["t1", [header, settlement(1, 10)]]]);
+		const ctx2 = context(local);
+		await collectUsage(ctx2);
+		const cachePath = join(root, "storages", "usage-cache.json");
+		const before = JSON.parse(await readFile(cachePath, "utf8"));
+		assert.equal(before.sessions.t1.consumed, 2, "the first fold is written");
+		mutate(local, "t1", [header, settlement(1, 10), settlement(2, 5, { step: 2 })]);
+		const current = await collectUsage(ctx2);
+		assert.equal(current.total.tokens, 29, "the in-memory fold is current");
+		const throttled = JSON.parse(await readFile(cachePath, "utf8"));
+		assert.equal(throttled.sessions.t1.consumed, 2, "a content-only change does not rewrite the file");
+		local.records.set("t2", { revision: Symbol("b"), inherited: 0, events: [header] });
+		await collectUsage(ctx2);
+		const structural = JSON.parse(await readFile(cachePath, "utf8"));
+		assert.deepEqual(Object.keys(structural.sessions).sort(), ["t1", "t2"], "a new session writes immediately");
+		process.env.DSH_HOME = home;
+	});
+	await test("a long run of tail folds is periodically re-derived from the whole log", async () => {
+		process.env.DSH_HOME = join(home, "verify-root");
+		const local = store([["v1", [header, settlement(1, 10)]]]);
+		const ctx2 = context(local);
+		await collectUsage(ctx2);
+		let events = [header, settlement(1, 10)];
+		// MODERN_EXTENSION_LIMIT is 20: the 21st append triggers the verification.
+		for (let step = 2; step <= 22; step += 1) {
+			events = [...events, settlement(step, 3, { step })];
+			mutate(local, "v1", events);
+			await collectUsage(ctx2);
+		}
+		assert.equal(local.stats.reads.at(-1), 0, "the periodic check reads the whole log");
+		const state = createUsageState();
+		applyUsageDelta(state, events);
+		let expected = 0;
+		for (const entry of state.days.values()) expected += totalTokens(entry.totals);
+		mutate(local, "v1", [...events, settlement(23, 4, { step: 23 })]);
+		const after = await collectUsage(ctx2);
+		assert.ok(after.total.tokens > expected, "the tail fold continues from the re-derived state");
+		process.env.DSH_HOME = home;
 	});
 	await test("v2 exact icon exports resolve by name without a wildcard or a mutation", async () => {
 		let declaration;

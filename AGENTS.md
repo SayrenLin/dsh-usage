@@ -5,18 +5,16 @@
 | 文件 | 职责 |
 | --- | --- |
 | `lib/index.js` | 服务端 Cordis 插件：3 个回环 GET 端点、凭据 seam、5 分钟后台刷新 |
-| `lib/usage.js` | token 折叠纯函数（按日/模型/24 小时桶，同 turn/step 替换；retry-started 另算新尝试） |
+| `lib/usage.js` | token 折叠纯函数（按日/模型，同 turn/step 替换；retry-started 另算新尝试） |
 | `lib/balance.js` | 余额 scheme 注册表（DeepSeek/OpenRouter/Moonshot/Z.ai） |
 | `lib/safe-fetch.js` | 上游安全请求：HTTPS 强制、DNS 固定防 rebinding、1 MiB 上限 |
-| `lib/claude.js` | Claude Code JSONL 增量聚合（只存数字+游标） |
-| `lib/client.js` | 客户端 widget 体系：无构建 `__ModuleLoader__` bundle（手写 jsx-runtime） |
-| `scripts/test-*.mjs` | 离线测试（balance/usage/server/client/e2e/claude） |
+| `lib/client.js` | 客户端：无构建 `__ModuleLoader__` bundle（手写 jsx-runtime），悬浮卡 + 详情面板 |
+| `scripts/test-*.mjs` | 离线测试（balance/usage/server/client/e2e/package/modern/compat） |
 | `vendor/` | DSH 客户端加载器 fixture（MIT，供真实 loader 预演测试） |
 
 ## 红线
 
 - 三个端点只接受回环 GET（peer socket 校验），绝不向公网/局域网开放。
-- Claude JSONL 只聚合数字：对话文本永不落盘、永不进浏览器响应。
 - 凭据只经 Harness credentials seam 解析，永不进响应/缓存/日志。
 - 客户端无构建步骤：禁止引入 JSX 构建器依赖；改 `lib/client.js` 手写 `react_jsx_runtime` 调用。
 - `lib/client.js` 引用的非 DSH 基础前端包必须同时写入 `dependencies` 与 `dsh.client.inject`；发布前必须在无工作区 junction 的干净 hoisted profile 中安装最终包验证。
@@ -27,11 +25,11 @@
 
 ```bash
 npm run check        # 全量语法检查
-npm test             # 118 个离线测试，全绿才可提交
+npm test             # 全部离线测试，全绿才可提交
 npm run test:package # 发布依赖与 client inject 契约
-npm run test:modern  # 22 项 0.2 契约回归；参数可指定安装目录和固定 SDK 的 node_modules
+npm run test:modern  # 25 项 0.2 契约回归；参数可指定安装目录和固定 SDK 的 node_modules
+node deploy.mjs --check-only              # 安装副本是否落后于仓库（去掉参数才写盘）
 npm run test:compat  # 5 项宿主兼容契约：events / snapshotEvents / ownEvents / 无 reader
-node scripts/validate-claude.mjs          # 真实 ~/.claude 数据预演
 node scripts/proxy-fetch.mjs <url>        # 沙箱内经 127.0.0.1:7890 代理拉取 https
 node scripts/github-research.mjs          # GitHub 星数调研（走代理，带重试）
 ```
@@ -40,15 +38,19 @@ node scripts/github-research.mjs          # GitHub 星数调研（走代理，�
 
 - Desktop 宿主实测为 0.2.1-rc.3（npm latest 标签为 0.2.1-rc.2，desktop 走 nightly 通道）；开发候选保留 client.platform=web。桌面包管理只能用桌面自带 CLI 与 desktop profile。升级提示按 dsh-app: 区分环境，不把网页端的更新与重启指令给桌面用户；离线通过不等于真实桌面验收。
 - 客户端设置持久化于 localStorage `dsh-usage:settings:v1`；`defaultSettings()` 即产品预设，改动需同步 e2e 断言。
-- 服务端缓存版本变更必须同步升 `CACHE_VERSION`（usage-cache.json v4 / claude cache v1），旧缓存自动失效重算。
-- 单条会话读取/关闭失败不得拖垮其他用量；失败记录清除旧折叠缓存且下次重试，API 必须返回 coverage（宿主列出的 totalSessions/countedSessions/skippedSessions，附 per-session reason）。partial 显示精确的可读小计 + 可展开告警，数值不加「≥」前缀；全部为 `unsupported-format`（旧格式遗留）时告警降级为静默样式且不阻塞通道比例，其他原因才显示警示点；unavailable 的 total=null、界面为「—」，不可当成零或宣称完整统计；会话列表整体失败仍为错误。只经官方 read handle，不降级解压/改写真实历史日志。
+- 服务端缓存版本变更必须同步升 `CACHE_VERSION`（usage-cache.json 当前 v6），旧缓存自动失效重算。
+- 单条会话读取/关闭失败不得拖垮其他用量；失败记录清除旧折叠缓存且下次重试，API 必须返回 coverage（宿主列出的 totalSessions/countedSessions/skippedSessions，附 per-session reason）。partial 显示精确的可读小计 + 可展开告警，数值不加「≥」前缀；全部为 `unsupported-format`（旧格式遗留）时告警降级为静默样式，其他原因才显示警示点；unavailable 的 total=null、界面为「—」，不可当成零或宣称完整统计；会话列表整体失败仍为错误。只经官方 read handle，不降级解压/改写真实历史日志。
 - 宿主兼容：实时会话按 events / snapshotEvents / ownEvents 顺序探测，认不出则该会话计入 skipped（reason unsupported-session-api），绝不让整条端点 500；持久化日志按 open(0.2) / readFrom(0.1.x) 探测，都没有时 skipped（reason unsupported-host）。新增宿主形状必须补 test-compat 用例。
-- 0.2 会话经 persistence.list/open('read')/read(0)/finally close；变化的 revision 全量重算、fork 继承前缀不重复计费，opaque revision 只留内存且按 service identity 隔离。旧 events/readFrom 分支保留，但候选包的整套旧宿主 GUI 尚未复验。
-- 隔离验收必须设 config.balanceEnabled=false（禁止解析凭据与上游请求），同时显式隔离 CLAUDE_CONFIG_DIR；不能运行真实 Claude 验证脚本或把离线桩测试写成真实账号验收。
-- 拖拽排序用 ghost 占位方案：拖拽中不改布局，drop 时一次性提交 + FLIP 动画。
+- 0.2 会话经 persistence.list/open('read')/read(from)/finally close：同一进程内、日志只增长（eventCount 变大）且 fork 继承前缀不变时只读增量并折叠到缓存；冷启动、revision 未记录、长度不变或变短（重写/截断）一律全量重算。fork 继承前缀不重复计费，opaque revision 只留内存且按 service identity 隔离。旧 events/readFrom 分支保留，但候选包的整套旧宿主 GUI 尚未复验。
+- 隔离验收必须设 config.balanceEnabled=false（禁止解析凭据与上游请求）；不能把离线桩测试写成真实账号验收。
 - 测试字典从插件 `apply()` 捕获，禁止在测试里维护字典副本。
 - 悬浮窗仅余额用主题色；其余信息用中性色阶。
-- 可 pin 的 widget 白名单：balance/today/month/hit；其余在 `WIDGET_PINABLE` 中禁用。
+- `/api/usage/usage` 带内容 ETag，客户端用 `If-None-Match`，未变化返回 304 空响应；payload 不含时间戳字段，否则 ETag 永远变。
+- `usage-cache.json` 是会话日志的物化视图：内容变化受 `CACHE_WRITE_INTERVAL_MS`（5 分钟）写窗口节流，**新增/删除会话立即落盘**；丢缓存最多多一次全量重折。
+- 尾部增量折叠每 `MODERN_EXTENSION_LIMIT`（20 次）强制全量重折一次并比较 token 总量，不一致会 `logger.warn`——这是「日志只增长」假设的安全网，不要关掉。
+- `/api/usage/usage` 只回最近 `USAGE_WINDOW_DAYS`（63 天）的逐日明细，`total` 仍是全量；响应里不再有 `models` / `hours` 数组（面板不画模型/小时维度），加维度前先确认前端真的要用。
+- 发版：`package.json` 版本与 git tag 必须一致（裸版本号 + annotated tag）；市场按 tag 读取仓库里的 `package.json` 校验版本，`npm pack` 产物需重命名为 `dsh-usage-dock.tgz` 再挂到该 tag 的 release，与 catalog 的 floating asset 名保持一致。
+- 峰谷计价口径集中在 `lib/usage.js`：`PEAK_HOLIDAYS` 是唯一节假日表，`holidayCoverageAt` 负责报告表覆盖不到的年份，跨年补表时同步更新它。
 
 ## 深入文档
 

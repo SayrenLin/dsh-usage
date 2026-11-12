@@ -116,12 +116,10 @@ dom.window.fetch = async (input) => {
 				date.setDate(date.getDate() - (40 - index));
 				const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 				const tokens = [0, 0, 120000, 480000, 900000, 1500000, 2300000][index % 7];
-				return { date: key, tokens, cacheHitRate: 80 + (index % 15), inputTokens: Math.round(tokens * 0.1), outputTokens: Math.round(tokens * 0.05), cacheReadTokens: Math.round(tokens * 0.85), cacheWriteTokens: 0, hours: new Array(24).fill(0), models: [] };
+				return { date: key, tokens, cacheHitRate: 80 + (index % 15), inputTokens: Math.round(tokens * 0.1), outputTokens: Math.round(tokens * 0.05), cacheReadTokens: Math.round(tokens * 0.85), cacheWriteTokens: 0 };
 			}), {
 				date: todayKey, inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0,
 				tokens: 988000, cacheHitRate: 84,
-				hours: Array.from({ length: 24 }, (_, i) => (i >= 9 && i < 12) || (i >= 14 && i < 18) ? 40000 : 6000),
-				models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 } }],
 				sessions: [
 					{ id: "session-alpha", title: "安装 dsh 插件并添加悬浮窗文字", inputTokens: 120000, outputTokens: 48000, cacheReadTokens: 820000, cacheWriteTokens: 0, tokens: 988000, cacheHitRate: 84, cost: { total: 3.42, peak: 2.31, offPeak: 1.11 }, cwd: "C:\\Users\\pc01\\Vibe" }
 				],

@@ -15,7 +15,7 @@
  *   node deploy.mjs --profile web   # another profile
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +24,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const PACKAGE = "dsh-usage-dock";
 /** Pre-rename package name: an older install still lives under it. */
 const LEGACY_PACKAGE = "dsh-usage";
-const FILES = ["lib/client.js", "lib/usage.js", "lib/index.js", "lib/safe-fetch.js"];
+/** Every module under lib/ ships together; a hardcoded list silently goes stale. */
+const FILES = readdirSync(join(here, "lib"))
+	.filter((entry) => entry.endsWith(".js"))
+	.sort()
+	.map((entry) => join("lib", entry));
 
 const argv = process.argv.slice(2);
 const checkOnly = argv.includes("--check-only");

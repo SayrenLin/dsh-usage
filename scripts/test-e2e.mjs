@@ -94,13 +94,6 @@ const USAGE = {
 		cacheWriteTokens: 0,
 		tokens: 1150,
 		cacheHitRate: 87,
-		hours: (() => {
-			const hours = new Array(24).fill(0);
-			hours[10] = 400;
-			hours[11] = 750;
-			return hours;
-		})(),
-		models: [{ model: "deepseek-official/deepseek-v4-pro", inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87, cost: { total: 3, peak: 2, offPeak: 1 } }],
 		sessions: [
 			{ id: "session-alpha", title: "安装 dsh 插件", inputTokens: 100, outputTokens: 50, cacheReadTokens: 650, cacheWriteTokens: 0, tokens: 800, cacheHitRate: 80, cost: { total: 2, peak: 1.5, offPeak: 0.5 }, cwd: "C:\\Users\\pc01\\Vibe", createdAt: 1 },
 			{ id: "session-beta", title: null, inputTokens: 0, outputTokens: 10, cacheReadTokens: 340, cacheWriteTokens: 0, tokens: 350, cacheHitRate: 90, cost: { total: 1, peak: 0.5, offPeak: 0.5 }, cwd: "C:\\Users\\pc01\\docs", createdAt: 2 }
@@ -109,21 +102,6 @@ const USAGE = {
 	}],
 	total: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 1000, cacheWriteTokens: 0, tokens: 1150, cacheHitRate: 87, cost: { total: 3, peak: 2, offPeak: 1 } },
 	costMeta: { currency: "CNY", source: "official", offPeakMultiplier: 0.5, unpriced: [] },
-	claude: {
-		enabled: true,
-		files: 1,
-		days: [{
-			date: todayKey,
-			inputTokens: 300,
-			outputTokens: 120,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
-			tokens: 420,
-			cacheHitRate: 0,
-			hours: new Array(24).fill(0)
-		}],
-		total: { inputTokens: 300, outputTokens: 120, cacheReadTokens: 0, cacheWriteTokens: 0, tokens: 420, cacheHitRate: 0 }
-	},
 	updatedAt: Date.now()
 };
 
@@ -135,7 +113,9 @@ let balanceAccount = null;
 dom.window.fetch = async (input) => {
 	const url = String(input);
 	fetchCalls.push(url);
-	if (url.includes("/api/usage/providers")) return okResponse({ ok: true, providers: PROVIDERS });
+	// A real fetch always parses into fresh objects; a shared array would let
+	// React bail out of the re-render on reference identity alone.
+	if (url.includes("/api/usage/providers")) return okResponse({ ok: true, providers: PROVIDERS.map((provider) => ({ ...provider })) });
 	if (url.includes("/api/usage/balance")) {
 		const account = balanceAccount ?? (url.includes("openrouter") ? OPENROUTER_ACCOUNT : ACCOUNT);
 		return okResponse({ ok: true, account });
@@ -259,6 +239,59 @@ await test("the dock card is display-only; only the gear opens the panel", async
 	assert.equal(q("[data-dsh-usage-panel]"), null, "card clicks do nothing");
 	await openPanel();
 	assert.ok(q("[data-dsh-usage-panel]") !== null, "gear opens the panel");
+});
+
+await test("the spend header is the disclosure button, the card is not focusable", async () => {
+	await freshMount();
+	const head = q(".u_costHead");
+	assert.equal(head.tagName, "BUTTON", "the expander is a real button");
+	assert.equal(head.getAttribute("aria-expanded"), "false");
+	assert.equal(q(".u_dockCard").getAttribute("tabindex"), null, "the card itself is mouse-only");
+	head.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+	await sleep(80);
+	assert.equal(q(".u_costHead").getAttribute("aria-expanded"), "true", "clicking the header expands");
+	assert.equal(q(".u_dockCard").getAttribute("data-expanded"), "true");
+});
+
+await test("an unchanged poll (304) keeps the numbers on screen", async () => {
+	await freshMount();
+	await sleep(120);
+	const before = q(".u_costValue").textContent;
+	usageResponse = () => ({ ok: true, status: 304, json: async () => ({}) });
+	dom.window.dispatchEvent(new dom.window.Event("focus"));
+	await sleep(150);
+	assert.equal(q(".u_costValue").textContent, before, "a 304 does not blank the dashboard");
+	usageResponse = () => okResponse(USAGE);
+});
+
+await test("opening the panel picks up a provider configured after mount", async () => {
+	const original = PROVIDERS.splice(0, PROVIDERS.length);
+	PROVIDERS.push({
+		id: "deepseek-official",
+		displayName: "DeepSeek",
+		scheme: "deepseek",
+		mode: "balance",
+		configured: true,
+		status: "ok",
+		fetchedAt: Date.now(),
+		balance: { isAvailable: true, currency: "CNY", total: "128.00", granted: "0.00", toppedUp: "128.00" }
+	});
+	await freshMount();
+	PROVIDERS.push({
+		id: "deepseek-account",
+		displayName: "DeepSeek 账户",
+		scheme: null,
+		mode: "account",
+		configured: true,
+		status: "ok",
+		fetchedAt: Date.now(),
+		balance: { isAvailable: true, currency: "CNY", total: "9.00", granted: "0.00", toppedUp: "9.00" }
+	});
+	await openPanel();
+	await sleep(160);
+	const options = qa("[data-dsh-usage-panel] .u_providerSelect option").map((option) => option.textContent);
+	assert.ok(options.includes("DeepSeek 账户"), "a sign-in that happened after mount is visible");
+	PROVIDERS.splice(0, PROVIDERS.length, ...original);
 });
 
 await test("the panel shows two cards in a fixed order", async () => {
@@ -515,6 +548,64 @@ await test("switching provider shows its not-configured state", async () => {
 	const options = [...q("[data-dsh-usage-panel] .u_providerSelect").options].map((option) => option.value);
 	assert.deepEqual(options, ["deepseek-official", "openrouter"], "only configured providers are listed");
 	assert.ok(!options.includes("zai"), "unconfigured providers never appear");
+});
+
+await test("account login is selectable without an HTTP balance scheme", async () => {
+	// Account login reports scheme null (the host signs the request) but can
+	// still answer a balance; filtering on scheme alone hid it from the UI.
+	const original = PROVIDERS.splice(0, PROVIDERS.length);
+	PROVIDERS.push({
+		id: "deepseek-account",
+		displayName: "DeepSeek 账户",
+		scheme: null,
+		mode: "account",
+		configured: true,
+		status: "ok",
+		fetchedAt: Date.now(),
+		balance: { isAvailable: true, currency: "CNY", total: "128.00", granted: "0.00", toppedUp: "128.00" }
+	});
+	await freshMount();
+	assert.ok(fetchCalls.some((url) => url.includes("/api/usage/balance?provider=deepseek-account")), "the account route is queried");
+	assert.equal(q(".u_balanceLineValue").textContent, "¥128.00", "the account balance reaches the dock");
+	await openPanel();
+	assert.ok(q("[data-dsh-usage-panel]").textContent.includes("DeepSeek 账户"), "the account provider is named in the panel");
+	assert.ok(!q("[data-dsh-usage-panel]").textContent.includes(t("balance.noProvider")), "no false 'no provider' copy");
+	PROVIDERS.splice(0, PROVIDERS.length, ...original);
+});
+
+await test("a credits-style provider shows its used and limit", async () => {
+	// OpenRouter reports total_credits/total_usage instead of wallet halves.
+	balanceAccount = {
+		id: "openrouter",
+		displayName: "OpenRouter",
+		scheme: "openrouter",
+		mode: "balance",
+		status: "ok",
+		balance: { isAvailable: true, currency: "USD", total: 12.5, used: 87.5, limit: 100 },
+		fetchedAt: Date.now()
+	};
+	await freshMount();
+	await openPanel();
+	await sleep(100);
+	const table = q("[data-dsh-usage-panel] .u_balanceTable");
+	assert.ok(table !== null, "wallet table rendered from used/limit");
+	const text = table.textContent;
+	assert.ok(text.includes(t("balance.used")) && text.includes("$87.50"), "used shown");
+	assert.ok(text.includes(t("balance.limit")) && text.includes("$100.00"), "limit shown");
+	balanceAccount = null;
+});
+
+await test("an exhausted account reads as out of credit, not an upstream failure", async () => {
+	balanceAccount = { ...ACCOUNT, balance: { isAvailable: false, currency: "CNY", total: "0.00", granted: "0.00", toppedUp: "0.00" } };
+	await freshMount();
+	const value = q(".u_balanceLineValue");
+	assert.equal(value.getAttribute("data-tone"), "bad", "spend tone still flags the problem");
+	assert.ok((q(".u_warnDot")?.getAttribute("title") ?? "").includes(t("balance.outOfCredit")), "dock hint names the real cause");
+	await openPanel();
+	const panel = q("[data-dsh-usage-panel]").textContent;
+	assert.ok(panel.includes(t("balance.outOfCredit")), "panel status names the real cause");
+	assert.ok(!panel.includes(t("balance.unavailableStatus")), "the upstream is not blamed");
+	balanceAccount = null;
 });
 
 await test("clicking a heat cell selects that day", async () => {

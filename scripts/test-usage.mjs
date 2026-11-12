@@ -11,12 +11,12 @@ import {
 	createUsageState,
 	dayKey,
 	foldUsage,
-	mergeHoursInto,
 	mergeInto,
 	renderUsage,
 	totalTokens,
 	isPeakAt,
 	bucketsCost,
+	holidayCoverageAt,
 	OFF_PEAK_MULTIPLIER,
 	PEAK_HOLIDAYS
 } from "../lib/usage.js";
@@ -165,16 +165,16 @@ await test("renderUsage sorts days ascending and models by tokens descending", (
 		usageChunk(2, DAY1, 1, 1, { inputTokens: 100, outputTokens: 50 }),
 		usageChunk(3, DAY1, 1, 2, { inputTokens: 10, outputTokens: 3 })
 	]));
-	const rendered = renderUsage(byDay, new Map(), 42);
+	const rendered = renderUsage(byDay, 42);
 	assert.deepEqual(rendered.days.map((d) => d.date), [dayKey(DAY1), dayKey(DAY2)]);
 	assert.equal(rendered.days[0].tokens, 163);
-	assert.equal(rendered.days[0].models.length, 1);
-	assert.equal(rendered.days[0].hours.length, 24, "hour slots always rendered");
+	assert.equal("models" in rendered.days[0], false, "no per-model array on the wire");
+	assert.equal("hours" in rendered.days[0], false, "no per-hour array on the wire");
 	assert.equal(rendered.total.tokens, 170);
-	assert.equal(rendered.updatedAt, 42);
+	assert.equal("updatedAt" in rendered, false, "the aggregate timestamp stays off the wire");
 });
 
-await test("renderUsage models sorted descending within a day", () => {
+await test("a day sums its models into one priced cost", () => {
 	const byDay = new Map();
 	mergeInto(byDay, foldUsage([
 		header(DAY1, "big-model"),
@@ -182,53 +182,46 @@ await test("renderUsage models sorted descending within a day", () => {
 		header(DAY1, "small-model"),
 		usageChunk(3, DAY1, 2, 1, { inputTokens: 5, outputTokens: 5 })
 	]));
-	const rendered = renderUsage(byDay, new Map(), 0);
-	assert.deepEqual(rendered.days[0].models.map((m) => m.model), ["deepseek-official/big-model", "deepseek-official/small-model"]);
+	const priced = {
+		currency: "CNY",
+		source: "official",
+		prices: new Map([
+			["deepseek-official/big-model", { input: 2, output: 8, cacheRead: 0, cacheWrite: 0 }],
+			["deepseek-official/small-model", { input: 2, output: 8, cacheRead: 0, cacheWrite: 0 }]
+		])
+	};
+	const rendered = renderUsage(byDay, 0, { pricing: priced });
+	assert.equal(rendered.days[0].tokens, 110);
+	assert.ok(rendered.days[0].cost.total > 0, "the day is priced without shipping a model breakdown");
+	assert.deepEqual(rendered.costMeta.unpriced, []);
 });
 
-await test("hour buckets attribute samples to local hours", () => {
-	const events = [
-		header(DAY1, "deepseek-chat"),
-		usageChunk(2, DAY1, 1, 1, { inputTokens: 100, outputTokens: 50 })
-	];
-	const state = createUsageState();
-	applyUsageDelta(state, events);
-	const hours = state.hours.get(dayKey(DAY1));
-	assert.ok(hours !== void 0, "hour slots exist");
-	assert.equal(hours.length, 24);
-	const expectedHour = new Date(DAY1).getHours();
-	assert.equal(hours[expectedHour], 150, "all tokens land in the event hour");
-	assert.equal(hours[(expectedHour + 1) % 24], 0);
-});
-
-await test("hour buckets follow the replace-last-sample semantics across days", () => {
-	const state = createUsageState();
-	const hour1 = new Date(DAY1).getHours();
-	const hour2 = new Date(DAY2).getHours();
-	applyUsageDelta(state, [
+await test("the fold no longer tracks hour buckets", () => {
+	assert.equal("hours" in createUsageState(), false, "hour tracking left the fold state");
+	const byDay = foldUsage([
 		header(DAY1, "deepseek-chat"),
 		usageChunk(2, DAY1, 1, 1, { inputTokens: 100, outputTokens: 50 })
 	]);
-	// Same turn/step re-reported on the next day: subtract day1/hour1, add day2/hour2.
-	applyUsageDelta(state, [
-		usageChunk(3, DAY2, 1, 1, { inputTokens: 150, outputTokens: 90 })
-	]);
-	const day1 = state.hours.get(dayKey(DAY1));
-	const day2 = state.hours.get(dayKey(DAY2));
-	assert.equal(day1?.[hour1] ?? 0, 0, "day 1 hour bucket replaced back to zero");
-	assert.equal(day2[hour2], 240);
+	const rendered = renderUsage(byDay, Date.now());
+	assert.equal("hours" in rendered.days[0], false, "nothing re-adds an hour array");
 });
 
-await test("mergeHoursInto combines sessions per day", () => {
-	const a = createUsageState();
-	applyUsageDelta(a, [header(DAY1, "deepseek-chat"), usageChunk(2, DAY1, 1, 1, { inputTokens: 10, outputTokens: 5 })]);
-	const b = createUsageState();
-	applyUsageDelta(b, [header(DAY1, "deepseek-chat"), usageChunk(2, DAY1, 1, 1, { inputTokens: 20, outputTokens: 10 })]);
-	const byHour = new Map();
-	mergeHoursInto(byHour, a.hours);
-	mergeHoursInto(byHour, b.hours);
-	const expectedHour = new Date(DAY1).getHours();
-	assert.equal(byHour.get(dayKey(DAY1))[expectedHour], 45);
+await test("the wire window drops old days but keeps the lifetime total", () => {
+	const byDay = new Map();
+	const old = DAY1 - 400 * 24 * 60 * 60 * 1000;
+	mergeInto(byDay, foldUsage([
+		header(old, "deepseek-flash"),
+		usageChunk(2, old, 1, 1, { inputTokens: 100, outputTokens: 50 })
+	]));
+	mergeInto(byDay, foldUsage([
+		header(DAY1, "deepseek-flash"),
+		usageChunk(2, DAY1, 1, 1, { inputTokens: 10, outputTokens: 5 })
+	]));
+	const now = DAY1;
+	const windowed = renderUsage(byDay, now, { windowDays: 63 });
+	assert.deepEqual(windowed.days.map((day) => day.date), [dayKey(DAY1)], "only the window leaves the server");
+	assert.equal(windowed.total.tokens, 165, "the total still covers every day");
+	assert.equal(renderUsage(byDay, now).days.length, 2, "windowDays=0 keeps everything");
 });
 
 await test("peak windows follow the Beijing clock, not the host clock", () => {
@@ -259,14 +252,33 @@ await test("statutory holidays are off-peak even on a weekday", () => {
 	assert.equal(PEAK_HOLIDAYS.size, 33, "the 2026 table covers every statutory day");
 });
 
-await test("a weekday holiday is billed entirely at the off-peak price", () => {
+await test("the holiday table reports the years it cannot price", () => {
+	// 2026-11-09 10:00 Beijing is inside the covered year.
+	assert.deepEqual(holidayCoverageAt(Date.parse("2026-11-09T02:00:00Z")), { covered: true, year: 2026 });
+	// 2027-01-04 10:00 Beijing is a Monday in a year with no dates: peak it is,
+	// but the payload must say the answer is unsupported rather than implied.
+	assert.deepEqual(holidayCoverageAt(Date.parse("2027-01-04T02:00:00Z")), { covered: false, year: 2027 });
+	// A caller-supplied table is judged on its own dates.
+	assert.equal(holidayCoverageAt(Date.parse("2025-03-03T02:00:00Z"), new Set(["2025-03-03"])).covered, true);
+	assert.equal(holidayCoverageAt(Date.parse("2025-03-03T02:00:00Z"), new Set()).covered, false);
 	const state = createUsageState();
+	applyUsageDelta(state, [header(Date.parse("2026-02-17T02:00:00Z"), "deepseek-flash")]);
+	const priced = { currency: "CNY", source: "official", prices: new Map() };
+	// No verdict supplied = "unknown", never a claim of coverage.
+	assert.equal(renderUsage(state.days, Date.now(), { pricing: priced }).costMeta.holidayCoverage, "unknown");
+	const gap = renderUsage(state.days, Date.now(), { pricing: priced, holidayCoverage: { covered: false, year: 2027 } });
+	assert.equal(gap.costMeta.holidayCoverage, "uncovered");
+	assert.equal(gap.costMeta.holidayYear, 2027);
+	assert.equal(renderUsage(state.days, Date.now(), { pricing: priced, holidayCoverage: { covered: true, year: 2026 } }).costMeta.holidayCoverage, "covered");
+});
+
+await test("a weekday holiday is billed entirely at the off-peak price", () => {	const state = createUsageState();
 	applyUsageDelta(state, [
 		header(Date.parse("2026-02-17T02:00:00Z"), "deepseek-flash"),
 		usageChunk(2, Date.parse("2026-02-17T02:00:00Z"), 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
 	]);
 	const pricing = { currency: "CNY", source: "official", prices: new Map([["deepseek-official/deepseek-flash", { input: 2, output: 8, cacheRead: 0.04, cacheWrite: 0 }]]) };
-	const out = renderUsage(state.days, state.hours, Date.now(), { pricing });
+	const out = renderUsage(state.days, Date.now(), { pricing });
 	assert.deepEqual(out.days[0].cost, { total: 1, peak: 0, offPeak: 1 }, "Spring Festival 10:00 is billed at half");
 });
 
@@ -278,18 +290,18 @@ await test("spend splits peak at full price and off-peak at half", () => {
 		usageChunk(3, Date.parse("2026-11-09T05:00:00Z"), 1, 2, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
 	]);
 	const pricing = { currency: "CNY", source: "official", prices: new Map([["deepseek-official/deepseek-flash", { input: 2, output: 8, cacheRead: 0.04, cacheWrite: 0 }]]) };
-	const out = renderUsage(state.days, state.hours, Date.now(), { pricing });
+	const out = renderUsage(state.days, Date.now(), { pricing });
 	assert.equal(out.costMeta.currency, "CNY");
 	assert.deepEqual(out.days[0].cost, { total: 3, peak: 2, offPeak: 1 }, "1M peak @2 + 1M off-peak @1");
 	assert.deepEqual(out.total.cost, { total: 3, peak: 2, offPeak: 1 });
 	assert.equal(OFF_PEAK_MULTIPLIER, 0.5);
 	// The multiplier is a parameter, not a hard-coded 0.5.
-	const doubled = renderUsage(state.days, state.hours, Date.now(), { pricing, offPeakMultiplier: 1 });
+	const doubled = renderUsage(state.days, Date.now(), { pricing, offPeakMultiplier: 1 });
 	assert.deepEqual(doubled.days[0].cost, { total: 4, peak: 2, offPeak: 2 });
 	// The billing band travels with the payload so the dock cannot disagree.
-	assert.equal(renderUsage(state.days, state.hours, Date.now(), { pricing }).peak, null, "no verdict unless asked");
-	assert.equal(renderUsage(state.days, state.hours, Date.now(), { pricing, peakNow: true }).peak, "yellow");
-	assert.equal(renderUsage(state.days, state.hours, Date.now(), { pricing, peakNow: false }).peak, "green");
+	assert.equal(renderUsage(state.days, Date.now(), { pricing }).peak, null, "no verdict unless asked");
+	assert.equal(renderUsage(state.days, Date.now(), { pricing, peakNow: true }).peak, "yellow");
+	assert.equal(renderUsage(state.days, Date.now(), { pricing, peakNow: false }).peak, "green");
 });
 
 await test("unpriced models never produce a partial spend number", () => {
@@ -298,10 +310,10 @@ await test("unpriced models never produce a partial spend number", () => {
 		header(DAY1, "mystery-model", "custom-provider"),
 		usageChunk(2, DAY1, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
 	]);
-	const noPricing = renderUsage(state.days, state.hours, Date.now(), { pricing: null });
+	const noPricing = renderUsage(state.days, Date.now(), { pricing: null });
 	assert.equal(noPricing.days[0].cost, null, "no price table means no cost");
 	assert.equal(noPricing.costMeta, null);
-	const emptyPricing = renderUsage(state.days, state.hours, Date.now(), { pricing: { currency: "CNY", source: "official", prices: new Map() } });
+	const emptyPricing = renderUsage(state.days, Date.now(), { pricing: { currency: "CNY", source: "official", prices: new Map() } });
 	assert.equal(emptyPricing.days[0].cost, null, "unknown model means null, not zero");
 	assert.deepEqual(emptyPricing.costMeta.unpriced, ["custom-provider/mystery-model"]);
 	assert.equal(bucketsCost({ inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, { input: 9, output: 27, cacheRead: 0.3, cacheWrite: 0 }), 9);
@@ -319,7 +331,7 @@ await test("a flat catalog price keeps its full rate off-peak", () => {
 		source: "catalog",
 		prices: new Map([["openrouter/deepseek-chat", { input: 2, output: 8, cacheRead: 0.04, cacheWrite: 0, peakAware: false }]])
 	};
-	const out = renderUsage(state.days, state.hours, Date.now(), { pricing });
+	const out = renderUsage(state.days, Date.now(), { pricing });
 	// Both bands bill at the full rate; the split still follows the clock.
 	assert.deepEqual(out.days[0].cost, { total: 4, peak: 2, offPeak: 2 }, "a flat rate is not discounted at night");
 });

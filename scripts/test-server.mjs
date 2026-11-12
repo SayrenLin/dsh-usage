@@ -101,7 +101,7 @@ function handlerOf(routes, path) {
 	return route.handler;
 }
 
-async function call(handler, { method = "GET", url = "/", peer = "127.0.0.1", host = "localhost" } = {}) {
+async function call(handler, { method = "GET", url = "/", peer = "127.0.0.1", host = "localhost", headers = {} } = {}) {
 	const res = {
 		status: null,
 		headers: null,
@@ -114,7 +114,7 @@ async function call(handler, { method = "GET", url = "/", peer = "127.0.0.1", ho
 			this.body += body ?? "";
 		}
 	};
-	const req = { method, url, headers: { host }, socket: { remoteAddress: peer } };
+	const req = { method, url, headers: { host, ...headers }, socket: { remoteAddress: peer } };
 	await handler(req, res);
 	return res;
 }
@@ -272,6 +272,24 @@ await test("usage: empty sessions render an empty day list", async () => {
 	assert.equal(body.total.tokens, 0);
 });
 
+await test("an unchanged usage response answers 304 instead of resending the window", async () => {
+	const events = [
+		{ seq: 1, time: Date.now(), type: "request/header", data: { header: { config: { model: "deepseek-chat", provider: "deepseek-official" } } } },
+		usageEvent(2, Date.now(), 1, 1, { inputTokens: 100, outputTokens: 50 })
+	];
+	const { routes } = await boot({ sessions: { list: () => [{ id: "test-etag", events }] } });
+	const handler = handlerOf(routes, USAGE_PATH);
+	const first = await call(handler);
+	assert.equal(first.status, 200);
+	const tag = first.headers.etag;
+	assert.ok(typeof tag === "string" && tag.startsWith('"'), "the payload carries a quoted validator");
+	const second = await call(handler, { headers: { "if-none-match": tag } });
+	assert.equal(second.status, 304, "an unchanged body is not re-transferred");
+	assert.equal(second.body, "", "304 carries no body");
+	const stale = await call(handler, { headers: { "if-none-match": '"stale"' } });
+	assert.equal(stale.status, 200, "a mismatched validator still gets the body");
+});
+
 await test("usage: live session events fold into per-day totals", async () => {
 	const events = [
 		{ seq: 1, time: Date.now(), type: "request/header", data: { header: { config: { model: "deepseek-chat", provider: "deepseek-official" } } } },
@@ -282,7 +300,8 @@ await test("usage: live session events fold into per-day totals", async () => {
 	const body = parsed(res);
 	assert.equal(body.total.tokens, 150);
 	assert.equal(body.days.length, 1);
-	assert.equal(body.days[0].models[0].model, "deepseek-official/deepseek-chat");
+	assert.equal("models" in body.days[0], false, "the model breakdown no longer ships");
+	assert.equal(body.days[0].tokens, 150);
 });
 
 await test("usage: incremental fold only processes appended events", async () => {
