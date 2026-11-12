@@ -49,6 +49,7 @@ node scripts/github-research.mjs          # GitHub 星数调研（走代理，�
 - `usage-cache.json` 是会话日志的物化视图：内容变化受 `CACHE_WRITE_INTERVAL_MS`（5 分钟）写窗口节流，**新增/删除会话立即落盘**；丢缓存最多多一次全量重折。
 - 尾部增量折叠每 `MODERN_EXTENSION_LIMIT`（20 次）强制全量重折一次并比较 token 总量，不一致会 `logger.warn`——这是「日志只增长」假设的安全网，不要关掉。
 - `/api/usage/usage` 只回最近 `USAGE_WINDOW_DAYS`（63 天）的逐日明细，`total` 仍是全量；响应里不再有 `models` / `hours` 数组（面板不画模型/小时维度），加维度前先确认前端真的要用。
+- 宿主侧依赖只写 `peerDependencies`（`@deepseek-ai/cordis` + 实际注入的 `@deepseek-ai/dsh-*`）；市场卡片的「符合宿主要求」只按这个声明展示，只写 `engines.dsh` 会显示「宿主依赖未知」。新增注入的服务要同步补 peer。
 - 发版：`package.json` 版本与 git tag 必须一致（裸版本号 + annotated tag）；市场按 tag 读取仓库里的 `package.json` 校验版本，`npm pack` 产物需重命名为 `dsh-usage-dock.tgz` 再挂到该 tag 的 release，与 catalog 的 floating asset 名保持一致。
 - 峰谷计价口径集中在 `lib/usage.js`：`PEAK_HOLIDAYS` 是唯一节假日表，`holidayCoverageAt` 负责报告表覆盖不到的年份，跨年补表时同步更新它。
 
